@@ -36,16 +36,39 @@
         <jjwt.version>0.12.5</jjwt.version>
         <hutool.version>5.8.32</hutool.version>
         <shardingsphere.version>5.4.1</shardingsphere.version>
-        <!-- 本机 JDK 25，需覆盖 Boot 3.2 自带的旧版 Lombok -->
+        <!-- 本机高版本 JDK（24/25），需覆盖 Boot 3.2 自带的旧版 Lombok / ByteBuddy / Mockito / JaCoCo，同时完全兼容 CI JDK 17 -->
         <lombok.version>1.18.48</lombok.version>
+        <byte-buddy.version>1.17.5</byte-buddy.version>
+        <mockito.version>5.17.0</mockito.version>
         <!-- 代码质量工具 -->
         <spotless.version>2.43.0</spotless.version>
         <checkstyle.version>3.3.1</checkstyle.version>
-        <jacoco.version>0.8.12</jacoco.version>
+        <jacoco.version>0.8.13</jacoco.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <!-- 放在 Boot BOM 之前覆盖测试字节码工具版本，兼容 JDK 17 与 JDK 24 -->
+            <dependency>
+                <groupId>net.bytebuddy</groupId>
+                <artifactId>byte-buddy</artifactId>
+                <version>${byte-buddy.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.bytebuddy</groupId>
+                <artifactId>byte-buddy-agent</artifactId>
+                <version>${byte-buddy.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-core</artifactId>
+                <version>${mockito.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-junit-jupiter</artifactId>
+                <version>${mockito.version}</version>
+            </dependency>
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>

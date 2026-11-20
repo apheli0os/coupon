@@ -2,20 +2,25 @@
 
 前提：中间件已启动、三个服务已运行。下文统一使用 `X-User-Id` 请求头模拟登录（也可用 JWT）。
 
-## 1. 公共：签发 Token
+## 1. 公共：签发 Token（需激活 `dev` profile）
 
 ```bash
+# 普通用户 Token
 curl "http://localhost:8081/api/auth/token?userId=1001"
+# 管理员 Token（创建/发布模板与活动需要 ADMIN 角色）
+curl "http://localhost:8081/api/auth/token?userId=1&role=ADMIN"
 # {"code":0,"message":"success","data":"eyJhbGciOiJIUzI1NiJ9..."}
 ```
 
 ## 2. 优惠券
 
-### 2.1 创建模板
+### 2.1 创建模板（管理员）
 
 ```bash
 curl -X POST http://localhost:8081/api/coupon/templates \
   -H 'Content-Type: application/json' \
+  -H 'X-User-Id: 1' \
+  -H 'X-User-Role: ADMIN' \
   -d '{
     "name":"双11满200减50",
     "type":1,
@@ -29,11 +34,12 @@ curl -X POST http://localhost:8081/api/coupon/templates \
   }'
 ```
 
-### 2.2 发布（必须！否则 Redis 无库存）
+### 2.2 发布（管理员，必须！否则 Redis 无库存）
 
 ```bash
 curl -X POST http://localhost:8081/api/coupon/templates/{templateId}/publish \
-  -H 'X-User-Id: 1001'
+  -H 'X-User-Id: 1' \
+  -H 'X-User-Role: ADMIN'
 ```
 
 ### 2.3 领取 / 查询 / 核销
@@ -54,11 +60,13 @@ curl -X POST -H 'X-User-Id: 1001' http://localhost:8081/api/coupon/use \
 
 ## 3. 秒杀
 
-### 3.1 创建 / 发布
+### 3.1 创建 / 发布（管理员）
 
 ```bash
 curl -X POST http://localhost:8082/api/seckill/activities \
   -H 'Content-Type: application/json' \
+  -H 'X-User-Id: 1' \
+  -H 'X-User-Role: ADMIN' \
   -d '{
     "name":"限量秒杀",
     "productCode":"SKU-2026-002",
@@ -70,7 +78,8 @@ curl -X POST http://localhost:8082/api/seckill/activities \
     "endTime":"2026-12-31 23:59:59"
   }'
 
-curl -X POST -H 'X-User-Id: 1001' http://localhost:8082/api/seckill/activities/{activityId}/publish
+curl -X POST -H 'X-User-Id: 1' -H 'X-User-Role: ADMIN' \
+  http://localhost:8082/api/seckill/activities/{activityId}/publish
 ```
 
 ### 3.2 抢购 / 查询结果

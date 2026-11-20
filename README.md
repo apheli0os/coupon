@@ -156,13 +156,18 @@ com.mall.order.OrderServiceApplication          :8083
 
 ### 4.4 联调步骤
 
+> 本地联调需激活 `dev` profile（`--spring.profiles.active=dev`）以启用演示签发 Token 接口 `/api/auth/token`；生产/HA 环境不暴露该接口。
+
 ```bash
-# 1. 获取 token（也可以直接在请求头传 X-User-Id: 1001）
+# 1. 获取管理员与普通用户 token（创建/发布模板与活动需要 ADMIN 角色）
+ADMIN_TOKEN=$(curl -s "http://localhost:8081/api/auth/token?userId=1&role=ADMIN" | sed -E 's/.*"data":"([^"]+)".*/\1/')
+ADMIN_AUTH="Authorization: Bearer $ADMIN_TOKEN"
+
 TOKEN=$(curl -s "http://localhost:8081/api/auth/token?userId=1001" | sed -E 's/.*"data":"([^"]+)".*/\1/')
 AUTH="Authorization: Bearer $TOKEN"
 
-# 2. 发布券活动（预热 Redis 库存）
-curl -X POST -H "$AUTH" http://localhost:8081/api/coupon/templates/1001/publish
+# 2. 发布券活动（管理员预热 Redis 库存）
+curl -X POST -H "$ADMIN_AUTH" http://localhost:8081/api/coupon/templates/1001/publish
 
 # 3. 领券
 curl -X POST -H "$AUTH" http://localhost:8081/api/coupon/claim/1001
@@ -170,8 +175,8 @@ curl -X POST -H "$AUTH" http://localhost:8081/api/coupon/claim/1001
 # 4. 查看我的券
 curl -H "$AUTH" http://localhost:8081/api/coupon/my
 
-# 5. 发布秒杀活动
-curl -X POST -H "$AUTH" http://localhost:8082/api/seckill/activities/2001/publish
+# 5. 发布秒杀活动（管理员）
+curl -X POST -H "$ADMIN_AUTH" http://localhost:8082/api/seckill/activities/2001/publish
 
 # 6. 抢购
 curl -X POST -H "$AUTH" http://localhost:8082/api/seckill/2001/buy

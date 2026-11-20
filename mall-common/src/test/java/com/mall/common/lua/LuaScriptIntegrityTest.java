@@ -40,11 +40,17 @@ class LuaScriptIntegrityTest {
     }
 
     @Test
-    void rollbackScripts_shouldRestoreStock() throws IOException {
-        for (String name : new String[]{"coupon_rollback.lua", "seckill_rollback.lua"}) {
+    void rollbackScripts_shouldRestoreStockIdempotently() throws IOException {
+        for (String name : new String[]{"coupon_rollback.lua", "seckill_rollback.lua", "seckill_cancel_rollback.lua"}) {
             String script = load(name);
             assertTrue(script.contains("INCR") || script.contains("INCRBY"),
                     name + " 必须包含库存归还指令");
         }
+        String seckillRb = load("seckill_rollback.lua");
+        assertTrue(seckillRb.contains("if removed == 1"), "seckill_rollback 必须仅在 SREM==1 时归还库存");
+        String cancelRb = load("seckill_cancel_rollback.lua");
+        assertTrue(cancelRb.contains("'NX'"), "seckill_cancel_rollback 必须使用 NX 幂等键防重买误撤");
+        String tokenClaim = load("token_claim.lua");
+        assertTrue(tokenClaim.contains("PROCESSING:"), "token_claim 必须原子切换至 PROCESSING 态");
     }
 }

@@ -25,7 +25,11 @@ def call(base: str, path: str, body: dict | None = None) -> dict:
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(
         url, data=data, method="POST" if data else "GET",
-        headers={"Content-Type": "application/json", "X-User-Id": DEFAULT_ADMIN_USER},
+        headers={
+            "Content-Type": "application/json",
+            "X-User-Id": DEFAULT_ADMIN_USER,
+            "X-User-Role": "ADMIN",
+        },
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         result = json.loads(resp.read().decode("utf-8"))
