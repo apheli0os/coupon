@@ -12,6 +12,7 @@ public class OrderQueryResult implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private String orderId;
+    private Long userId;
     /** 0=待支付 1=已支付 2=已取消 */
     private Integer status;
     private String statusDesc;

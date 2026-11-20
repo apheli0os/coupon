@@ -1,6 +1,7 @@
 package com.mall.seckill.controller;
 
 import com.mall.common.R;
+import com.mall.common.context.UserContext;
 import com.mall.seckill.domain.dto.SeckillActivityCreateDTO;
 import com.mall.seckill.domain.entity.SeckillActivity;
 import com.mall.seckill.service.SeckillActivityService;
@@ -25,15 +26,17 @@ public class SeckillActivityController {
 
     private final SeckillActivityService activityService;
 
-    @Operation(summary = "创建秒杀活动")
+    @Operation(summary = "创建秒杀活动（管理员）")
     @PostMapping
     public R<Long> create(@Valid @RequestBody SeckillActivityCreateDTO dto) {
+        UserContext.requireAdmin();
         return R.ok(activityService.create(dto));
     }
 
-    @Operation(summary = "发布活动（库存预热）")
+    @Operation(summary = "发布活动（库存预热，管理员）")
     @PostMapping("/{id}/publish")
     public R<Void> publish(@PathVariable Long id) {
+        UserContext.requireAdmin();
         activityService.publish(id);
         return R.ok();
     }

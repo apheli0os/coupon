@@ -5,8 +5,12 @@ public final class CommonConstant {
     private CommonConstant() {
     }
 
-    /** 演示环境用户直通请求头；生产环境由网关注入或改用 JWT */
+    /** 演示环境用户直通请求头；生产环境由网关覆盖注入 */
     public static final String USER_ID_HEADER = "X-User-Id";
+    /** 用户角色请求头，由网关从 JWT 解析并覆盖注入 */
+    public static final String USER_ROLE_HEADER = "X-User-Role";
+    public static final String ROLE_USER = "USER";
+    public static final String ROLE_ADMIN = "ADMIN";
 
     public static final String MQ_TAG_SECKILL_ORDER = "seckill-order";
     public static final String MQ_TAG_ORDER_TIMEOUT = "order-timeout";

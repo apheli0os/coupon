@@ -19,11 +19,19 @@ public interface OrderService {
 
     SeckillOrder findByOrderId(String orderId);
 
+    /** 带归属人校验的订单查询，防止 IDOR 越权 */
+    SeckillOrder findByOrderIdForUser(String orderId, long userId, boolean isAdmin);
+
     OrderQueryResult queryResult(Long activityId, Long userId);
+
+    OrderQueryResult queryByOrderId(String orderId);
 
     boolean exists(String orderId);
 
-    void pay(String orderId);
+    void pay(String orderId, long userId);
 
-    void cancel(String orderId);
+    void cancel(String orderId, long userId, boolean isAdmin);
+
+    /** 系统定时关单（无 HTTP 用户上下文） */
+    boolean cancelBySystem(String orderId);
 }

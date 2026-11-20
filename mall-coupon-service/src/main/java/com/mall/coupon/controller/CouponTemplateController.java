@@ -1,6 +1,7 @@
 package com.mall.coupon.controller;
 
 import com.mall.common.R;
+import com.mall.common.context.UserContext;
 import com.mall.coupon.domain.dto.CouponTemplateCreateDTO;
 import com.mall.coupon.domain.entity.CouponTemplate;
 import com.mall.coupon.service.CouponTemplateService;
@@ -25,15 +26,17 @@ public class CouponTemplateController {
 
     private final CouponTemplateService templateService;
 
-    @Operation(summary = "创建券模板")
+    @Operation(summary = "创建券模板（管理员）")
     @PostMapping
     public R<Long> create(@Valid @RequestBody CouponTemplateCreateDTO dto) {
+        UserContext.requireAdmin();
         return R.ok(templateService.create(dto));
     }
 
-    @Operation(summary = "发布活动（预热库存）")
+    @Operation(summary = "发布活动（预热库存，管理员）")
     @PostMapping("/{id}/publish")
     public R<Void> publish(@PathVariable Long id) {
+        UserContext.requireAdmin();
         templateService.publish(id);
         return R.ok();
     }

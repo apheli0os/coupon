@@ -78,18 +78,25 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public OrderQueryResult queryResult(Long activityId, Long userId) {
-        SeckillOrder order = findByActivityAndUser(activityId, userId);
+    public SeckillOrder findByOrderIdForUser(String orderId, long userId, boolean isAdmin) {
+        SeckillOrder order = orderMapper.selectById(orderId);
         if (order == null) {
-            return null;
+            throw new BizException(ResultCode.ORDER_NOT_FOUND);
         }
-        OrderQueryResult result = new OrderQueryResult();
-        result.setOrderId(order.getOrderId());
-        result.setStatus(order.getStatus());
-        result.setStatusDesc(statusDesc(order.getStatus()));
-        result.setProductName(order.getProductName());
-        result.setTotalAmount(order.getTotalAmount());
-        return result;
+        if (!isAdmin && !Long.valueOf(userId).equals(order.getUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "无权查看他人订单");
+        }
+        return order;
+    }
+
+    @Override
+    public OrderQueryResult queryResult(Long activityId, Long userId) {
+        return toQueryResult(findByActivityAndUser(activityId, userId));
+    }
+
+    @Override
+    public OrderQueryResult queryByOrderId(String orderId) {
+        return toQueryResult(orderMapper.selectById(orderId));
     }
 
     @Override
@@ -99,9 +106,13 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void pay(String orderId) {
-        if (orderMapper.selectById(orderId) == null) {
+    public void pay(String orderId, long userId) {
+        SeckillOrder order = orderMapper.selectById(orderId);
+        if (order == null) {
             throw new BizException(ResultCode.ORDER_NOT_FOUND);
+        }
+        if (!Long.valueOf(userId).equals(order.getUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "无权支付他人订单");
         }
         if (orderMapper.pay(orderId) == 0) {
             throw new BizException(ResultCode.ORDER_STATUS_INVALID);
@@ -110,13 +121,37 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void cancel(String orderId) {
-        if (orderMapper.selectById(orderId) == null) {
+    public void cancel(String orderId, long userId, boolean isAdmin) {
+        SeckillOrder order = orderMapper.selectById(orderId);
+        if (order == null) {
             throw new BizException(ResultCode.ORDER_NOT_FOUND);
+        }
+        if (!isAdmin && !Long.valueOf(userId).equals(order.getUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "无权取消他人订单");
         }
         if (orderMapper.cancel(orderId) == 0) {
             throw new BizException(ResultCode.ORDER_STATUS_INVALID);
         }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean cancelBySystem(String orderId) {
+        return orderMapper.cancel(orderId) > 0;
+    }
+
+    private OrderQueryResult toQueryResult(SeckillOrder order) {
+        if (order == null) {
+            return null;
+        }
+        OrderQueryResult result = new OrderQueryResult();
+        result.setOrderId(order.getOrderId());
+        result.setUserId(order.getUserId());
+        result.setStatus(order.getStatus());
+        result.setStatusDesc(statusDesc(order.getStatus()));
+        result.setProductName(order.getProductName());
+        result.setTotalAmount(order.getTotalAmount());
+        return result;
     }
 
     private String statusDesc(Integer status) {

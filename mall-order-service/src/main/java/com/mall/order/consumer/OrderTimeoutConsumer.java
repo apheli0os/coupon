@@ -37,7 +37,9 @@ public class OrderTimeoutConsumer {
         List<SeckillOrder> expired = orderService.findExpiredUnpaid(threshold, BATCH_SIZE);
         for (SeckillOrder order : expired) {
             try {
-                orderService.cancel(order.getOrderId());
+                if (!orderService.cancelBySystem(order.getOrderId())) {
+                    continue;
+                }
                 int bucket = order.getStockBucket() == null ? 0 : order.getStockBucket();
                 luaExecutor.execute(LuaScriptExecutor.SCRIPT_SECKILL_ROLLBACK,
                         List.of(RedisKey.seckillStockBucket(order.getActivityId(), bucket),

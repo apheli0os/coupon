@@ -3,12 +3,14 @@ package com.mall.coupon.service.impl;
 import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import com.alibaba.csp.sentinel.slots.block.BlockException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.mall.common.R;
 import com.mall.common.ResultCode;
 import com.mall.common.constants.CommonConstant;
 import com.mall.common.constants.RedisKey;
 import com.mall.common.context.UserContext;
 import com.mall.common.exception.BizException;
 import com.mall.common.message.CouponClaimMessage;
+import com.mall.common.message.OrderQueryResult;
 import com.mall.common.metrics.BusinessMetrics;
 import com.mall.common.util.IdGenerator;
 import com.mall.common.util.LuaScriptExecutor;
@@ -163,21 +165,31 @@ public class CouponServiceImpl implements CouponService {
         if (coupon.getExpireTime() != null && coupon.getExpireTime().isBefore(LocalDateTime.now())) {
             throw new BizException(ResultCode.COUPON_EXPIRED);
         }
-        BigDecimal threshold = coupon.getThreshold() == null ? BigDecimal.ZERO : coupon.getThreshold();
-        if (dto.getOrderAmount().compareTo(threshold) < 0) {
-            throw new BizException(ResultCode.COUPON_THRESHOLD_NOT_MET);
-        }
-
-        // 订单存在性校验；订单服务不可用时走降级，不影响主流程
+        // 强制调用订单服务校验：存在性、归属人、待支付状态及服务端真实金额（fail-closed，不信任客户端传参）
+        R<OrderQueryResult> orderResp;
         try {
-            var exists = orderFeignClient.exists(dto.getOrderId());
-            if (exists != null && exists.getData() != null && !exists.getData()) {
-                throw new BizException(ResultCode.ORDER_NOT_FOUND);
-            }
-        } catch (BizException e) {
-            throw e;
+            orderResp = orderFeignClient.getOrder(dto.getOrderId());
         } catch (Exception e) {
-            log.warn("订单校验跳过 orderId={} cause={}", dto.getOrderId(), e.getMessage());
+            log.error("核销校验订单失败 orderId={} cause={}", dto.getOrderId(), e.getMessage());
+            throw new BizException(ResultCode.SYSTEM_ERROR, "订单服务暂不可用，请稍后重试");
+        }
+        if (orderResp == null || !orderResp.isSuccess()) {
+            throw new BizException(ResultCode.SYSTEM_ERROR, "订单服务暂不可用，请稍后重试");
+        }
+        OrderQueryResult order = orderResp.getData();
+        if (order == null) {
+            throw new BizException(ResultCode.ORDER_NOT_FOUND);
+        }
+        if (order.getUserId() == null || !order.getUserId().equals(userId)) {
+            throw new BizException(ResultCode.FORBIDDEN, "订单不属于当前用户");
+        }
+        if (!Integer.valueOf(0).equals(order.getStatus())) {
+            throw new BizException(ResultCode.ORDER_STATUS_INVALID, "仅待支付订单可使用优惠券");
+        }
+        BigDecimal realOrderAmount = order.getTotalAmount() == null ? BigDecimal.ZERO : order.getTotalAmount();
+        BigDecimal threshold = coupon.getThreshold() == null ? BigDecimal.ZERO : coupon.getThreshold();
+        if (realOrderAmount.compareTo(threshold) < 0) {
+            throw new BizException(ResultCode.COUPON_THRESHOLD_NOT_MET);
         }
 
         int rows = userCouponMapper.useCoupon(dto.getUserCouponId(), userId, dto.getOrderId());
