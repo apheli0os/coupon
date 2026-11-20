@@ -30,6 +30,9 @@ perf/logs/
 docker/rocketmq/
 docker/kafka/data/
 
+# 本地启停脚本运行时 PID 与日志
+.run/
+
 .DS_Store
 Thumbs.db
 *.swp

@@ -119,7 +119,26 @@ seckill:{2001}:status
 
 ## 4. 本地快速启动
 
-### 4.1 启动中间件
+### 4.0 一键启停脚本（推荐）
+
+Windows（PowerShell）与 Linux/macOS 均提供了一键脚本，自动完成「启动 Docker 中间件 → 等待端口就绪 → 缺包自动编译 → 启动 4 个微服务 → 等待 `/actuator/health` 变绿」：
+
+```powershell
+# Windows PowerShell
+.\scripts\mall.ps1 start             # 一键启动（默认 dev profile）
+.\scripts\mall.ps1 status            # 查看微服务与中间件状态
+.\scripts\mall.ps1 logs gateway      # 实时查看日志（coupon/seckill/order/gateway）
+.\scripts\mall.ps1 stop              # 一键停止（加 -Clean 清空数据卷）
+```
+
+```bash
+# Linux / macOS
+./scripts/mall.sh start
+./scripts/mall.sh status
+./scripts/mall.sh stop
+```
+
+### 4.1 手动启动中间件
 
 ```bash
 docker compose up -d
