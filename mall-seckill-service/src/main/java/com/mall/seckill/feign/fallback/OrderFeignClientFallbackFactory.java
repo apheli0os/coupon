@@ -1,7 +1,6 @@
 package com.mall.seckill.feign.fallback;
 
 import com.mall.common.R;
-import com.mall.common.message.OrderQueryResult;
 import com.mall.seckill.feign.OrderFeignClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cloud.openfeign.FallbackFactory;
