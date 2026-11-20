@@ -1,0 +1,186 @@
+# 三个业务服务无状态部署，镜像地址按实际仓库替换
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coupon-service
+  namespace: mall
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: coupon-service
+  template:
+    metadata:
+      labels:
+        app: coupon-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      containers:
+        - name: coupon-service
+          image: registry.example.com/mall/coupon-service:1.0.0
+          ports:
+            - containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: mall-common-config
+          env:
+            - name: WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: DB_URL
+              value: "jdbc:mysql://mysql.mall.svc.cluster.local:3306/mall_coupon?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mall-db-secret
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mall-db-secret
+                  key: password
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            initialDelaySeconds: 40
+            periodSeconds: 20
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seckill-service
+  namespace: mall
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: seckill-service
+  template:
+    metadata:
+      labels:
+        app: seckill-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8082"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      containers:
+        - name: seckill-service
+          image: registry.example.com/mall/seckill-service:1.0.0
+          ports:
+            - containerPort: 8082
+          envFrom:
+            - configMapRef:
+                name: mall-common-config
+          env:
+            - name: DB_URL
+              value: "jdbc:mysql://mysql.mall.svc.cluster.local:3306/mall_seckill?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mall-db-secret
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mall-db-secret
+                  key: password
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8082
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8082
+            initialDelaySeconds: 40
+            periodSeconds: 20
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: mall
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8083"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      containers:
+        - name: order-service
+          image: registry.example.com/mall/order-service:1.0.0
+          ports:
+            - containerPort: 8083
+          envFrom:
+            - configMapRef:
+                name: mall-common-config
+          env:
+            - name: DB_URL
+              value: "jdbc:mysql://mysql.mall.svc.cluster.local:3306/mall_order?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mall-db-secret
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mall-db-secret
+                  key: password
+          resources:
+            requests:
+              cpu: 300m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8083
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8083
+            initialDelaySeconds: 40
+            periodSeconds: 20

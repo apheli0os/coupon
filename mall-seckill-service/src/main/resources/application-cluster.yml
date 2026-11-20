@@ -1,0 +1,27 @@
+# Redis Cluster profile：3 主 3 从，水平扩展路径
+spring:
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        namespace: public
+        fail-fast: false
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/mall_seckill?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:root123456}
+  data:
+    redis:
+      cluster:
+        nodes: ${REDIS_CLUSTER_NODES:127.0.0.1:16391,127.0.0.1:16392,127.0.0.1:16393,127.0.0.1:16394,127.0.0.1:16395,127.0.0.1:16396}
+        max-redirects: 3
+      password: ${REDIS_PASSWORD:mallRedis2026}
+      timeout: 3s
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:127.0.0.1:9092}
+    producer:
+      acks: all
+      retries: 5
+      properties:
+        enable.idempotence: true
+        request.timeout.ms: 10000

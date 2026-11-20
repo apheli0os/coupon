@@ -1,0 +1,85 @@
+{
+  "meta": {
+    "scenario": "seckill",
+    "target": "http://localhost:8082",
+    "users": 300,
+    "duration_sec": 20.34,
+    "ramp_sec": 6.0,
+    "timestamp": "2026-11-18T20:38:25"
+  },
+  "summary": {
+    "total_requests": 68252,
+    "avg_qps": 3356.1,
+    "peak_qps": 3716,
+    "success": 0,
+    "success_rate_pct": 0.0,
+    "expected_rejects": 28354,
+    "http_5xx": 0,
+    "timeouts": 0,
+    "network_errors": 191,
+    "http_2xx": 68061
+  },
+  "latency_ms": {
+    "min": 5.19,
+    "avg": 74.59,
+    "p50": 78.95,
+    "p90": 94.68,
+    "p95": 97.98,
+    "p99": 153.99,
+    "max": 359.4
+  },
+  "biz_codes": {
+    "9002:MQ_SEND_FAILED": 39707,
+    "429:RATE_LIMITED": 28354,
+    "-1:UNKNOWN": 191
+  },
+  "http_codes": {
+    "0": 191,
+    "200": 68061
+  },
+  "qps_timeline": {
+    "614165": 700,
+    "614166": 3146,
+    "614167": 2982,
+    "614168": 3287,
+    "614169": 3554,
+    "614170": 3374,
+    "614171": 3438,
+    "614172": 3552,
+    "614173": 3509,
+    "614174": 3264,
+    "614175": 3559,
+    "614176": 3666,
+    "614177": 3458,
+    "614178": 3532,
+    "614179": 3404,
+    "614180": 3499,
+    "614181": 3716,
+    "614182": 3684,
+    "614183": 3629,
+    "614184": 3486,
+    "614185": 1813
+  },
+  "error_samples": [
+    "UNEXPECTED RuntimeError: Connection closed.",
+    "UNEXPECTED RuntimeError: Connection closed.",
+    "ClientConnectionError: Connector is closed. uid=2000173",
+    "ClientConnectionError: Connector is closed. uid=2000172",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000170",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000168",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000166",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000055",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000164",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000158",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000161",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000162",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000157",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000160",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000155",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000038",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000152",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000150",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000042",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000148"
+  ]
+}

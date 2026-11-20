@@ -1,0 +1,58 @@
+{
+  "meta": {
+    "scenario": "coupon",
+    "target": "http://localhost:8081",
+    "users": 10,
+    "duration_sec": 5.46,
+    "ramp_sec": 1.0,
+    "timestamp": "2026-11-18T07:24:55"
+  },
+  "summary": {
+    "total_requests": 15402,
+    "avg_qps": 2821.7,
+    "peak_qps": 3687,
+    "success": 10,
+    "success_rate_pct": 0.06,
+    "expected_rejects": 15384,
+    "http_5xx": 0,
+    "timeouts": 0,
+    "network_errors": 8,
+    "http_2xx": 15394
+  },
+  "latency_ms": {
+    "min": 1.02,
+    "avg": 2.9,
+    "p50": 2.69,
+    "p90": 3.83,
+    "p95": 4.56,
+    "p99": 6.6,
+    "max": 103.83
+  },
+  "biz_codes": {
+    "429:RATE_LIMITED": 14390,
+    "1005:COUPON_LIMIT_EXCEEDED": 994,
+    "0:SUCCESS": 10,
+    "-1:UNKNOWN": 8
+  },
+  "http_codes": {
+    "0": 8,
+    "200": 15394
+  },
+  "qps_timeline": {
+    "566570": 1480,
+    "566571": 3472,
+    "566572": 3161,
+    "566573": 3687,
+    "566574": 3602
+  },
+  "error_samples": [
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000004",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000001",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000000",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000005",
+    "ServerDisconnectedError: Server disconnected uid=2000006",
+    "ServerDisconnectedError: Server disconnected uid=2000002",
+    "ServerDisconnectedError: Server disconnected uid=2000003",
+    "ServerDisconnectedError: Server disconnected uid=2000008"
+  ]
+}

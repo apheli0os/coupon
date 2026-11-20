@@ -1,0 +1,12 @@
+# 轻量镜像：直接用已构建的 fat jar（由 mvn package 产出），不重复编译
+# 用法：docker build --build-arg JAR=mall-coupon-service/target/mall-coupon-service-1.0.0-SNAPSHOT.jar \
+#                    -t mall/coupon-service:1.0.0 -f Dockerfile.local .
+FROM eclipse-temurin:17-jre-jammy
+ARG JAR
+WORKDIR /app
+COPY ${JAR} /app/app.jar
+# Sentinel 1.8.6 启动时会写 ${user.home}/logs/csp，非 root 用户目录不可写会 NPE；
+# 本地验证镜像以 root 运行。生产建议改用可写的 /home/mall/logs 并设 -Duser.home。
+EXPOSE 8080 8081 8082 8083
+ENV JAVA_OPTS="-Xms192m -Xmx384m -XX:+UseG1GC" SPRING_PROFILES_ACTIVE=ha
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar /app/app.jar"]

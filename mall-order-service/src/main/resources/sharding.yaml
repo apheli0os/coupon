@@ -1,0 +1,43 @@
+# ShardingSphere 原生 YAML（由 YamlShardingSphereDataSourceFactory 加载）
+# seckill_order 按 activity_id 分 2 库 × 4 表；同一活动的数据落在同一分片，唯一索引仍生效
+dataSources:
+  ds0:
+    dataSourceClassName: com.zaxxer.hikari.HikariDataSource
+    jdbcUrl: jdbc:mysql://127.0.0.1:3306/mall_order_0?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: root
+    password: root123456
+    maximumPoolSize: 20
+  ds1:
+    dataSourceClassName: com.zaxxer.hikari.HikariDataSource
+    jdbcUrl: jdbc:mysql://127.0.0.1:3306/mall_order_1?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: root
+    password: root123456
+    maximumPoolSize: 20
+
+rules:
+  - !SHARDING
+    tables:
+      seckill_activity:
+        actualDataNodes: ds0.seckill_activity
+      seckill_order:
+        actualDataNodes: ds${0..1}.seckill_order_${0..3}
+        databaseStrategy:
+          standard:
+            shardingColumn: activity_id
+            shardingAlgorithmName: order-db-mod
+        tableStrategy:
+          standard:
+            shardingColumn: activity_id
+            shardingAlgorithmName: order-tbl-mod
+    shardingAlgorithms:
+      order-db-mod:
+        type: MOD
+        props:
+          sharding-count: 2
+      order-tbl-mod:
+        type: MOD
+        props:
+          sharding-count: 4
+
+props:
+  sql-show: false

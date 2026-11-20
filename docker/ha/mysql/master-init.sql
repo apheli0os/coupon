@@ -1,0 +1,4 @@
+-- 主库复制账号初始化（业务库表由 00-init.sql 负责，无需重复 SOURCE）
+CREATE USER IF NOT EXISTS 'repl'@'%' IDENTIFIED BY 'repl2026';
+GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'repl'@'%';
+FLUSH PRIVILEGES;

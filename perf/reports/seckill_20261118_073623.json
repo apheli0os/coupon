@@ -1,0 +1,64 @@
+{
+  "meta": {
+    "scenario": "seckill",
+    "target": "http://localhost:8082",
+    "users": 20,
+    "duration_sec": 6.37,
+    "ramp_sec": 1.0,
+    "timestamp": "2026-11-18T07:36:23"
+  },
+  "summary": {
+    "total_requests": 40,
+    "avg_qps": 6.3,
+    "peak_qps": 20,
+    "success": 0,
+    "success_rate_pct": 0.0,
+    "expected_rejects": 0,
+    "http_5xx": 0,
+    "timeouts": 0,
+    "network_errors": 19,
+    "http_2xx": 21
+  },
+  "latency_ms": {
+    "min": 2124.48,
+    "avg": 2782.5,
+    "p50": 2938.05,
+    "p90": 2990.05,
+    "p95": 3022.14,
+    "p99": 3036.78,
+    "max": 3045.72
+  },
+  "biz_codes": {
+    "9002:MQ_SEND_FAILED": 21,
+    "-1:UNKNOWN": 19
+  },
+  "http_codes": {
+    "0": 19,
+    "200": 21
+  },
+  "qps_timeline": {
+    "567260": 20,
+    "567263": 20
+  },
+  "error_samples": [
+    "ServerDisconnectedError: Server disconnected uid=2000015",
+    "ServerDisconnectedError: Server disconnected uid=2000007",
+    "ServerDisconnectedError: Server disconnected uid=2000009",
+    "ServerDisconnectedError: Server disconnected uid=2000012",
+    "ServerDisconnectedError: Server disconnected uid=2000004",
+    "ServerDisconnectedError: Server disconnected uid=2000006",
+    "ServerDisconnectedError: Server disconnected uid=2000014",
+    "ServerDisconnectedError: Server disconnected uid=2000017",
+    "ServerDisconnectedError: Server disconnected uid=2000019",
+    "ServerDisconnectedError: Server disconnected uid=2000011",
+    "ServerDisconnectedError: Server disconnected uid=2000001",
+    "ServerDisconnectedError: Server disconnected uid=2000003",
+    "ServerDisconnectedError: Server disconnected uid=2000008",
+    "ServerDisconnectedError: Server disconnected uid=2000016",
+    "ServerDisconnectedError: Server disconnected uid=2000005",
+    "ServerDisconnectedError: Server disconnected uid=2000010",
+    "ServerDisconnectedError: Server disconnected uid=2000013",
+    "ServerDisconnectedError: Server disconnected uid=2000018",
+    "ServerDisconnectedError: Server disconnected uid=2000002"
+  ]
+}

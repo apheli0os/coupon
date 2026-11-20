@@ -1,0 +1,43 @@
+# ShardingSphere 原生 YAML（由 YamlShardingSphereDataSourceFactory 加载）
+# user_coupon 按 user_id 分 2 库 × 4 表；coupon_template 是小表，单表留在 ds0
+dataSources:
+  ds0:
+    dataSourceClassName: com.zaxxer.hikari.HikariDataSource
+    jdbcUrl: jdbc:mysql://127.0.0.1:3306/mall_coupon_0?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: root
+    password: root123456
+    maximumPoolSize: 20
+  ds1:
+    dataSourceClassName: com.zaxxer.hikari.HikariDataSource
+    jdbcUrl: jdbc:mysql://127.0.0.1:3306/mall_coupon_1?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: root
+    password: root123456
+    maximumPoolSize: 20
+
+rules:
+  - !SHARDING
+    tables:
+      coupon_template:
+        actualDataNodes: ds0.coupon_template
+      user_coupon:
+        actualDataNodes: ds${0..1}.user_coupon_${0..3}
+        databaseStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: coupon-db-mod
+        tableStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: coupon-tbl-mod
+    shardingAlgorithms:
+      coupon-db-mod:
+        type: MOD
+        props:
+          sharding-count: 2
+      coupon-tbl-mod:
+        type: MOD
+        props:
+          sharding-count: 4
+
+props:
+  sql-show: false

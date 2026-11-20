@@ -1,0 +1,50 @@
+# GitHub Actions CI 模板（参考用）
+#
+# 说明：
+#   - 本项目当前未必托管在 GitHub，此文件作为「代码质量检查标准」的参考模板。
+#   - 若把代码推到 GitHub，此工作流会在 push / PR 时自动运行，无需额外配置。
+#   - 若用 GitLab/Jenkins，把下面 steps 里的命令照搬即可（核心是 mvn test / spotless:check / checkstyle:check）。
+
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: 编译 + 单元测试（含 JaCoCo 覆盖率）
+        run: mvn -B test
+
+      # Spotless 格式检查暂不纳入 CI：存量代码不符合 google-java-format，
+      # 强制 check 会让所有构建变红。需要统一格式时手工跑 mvn spotless:apply。
+      # - name: 代码格式检查（Spotless）
+      #   run: mvn -B spotless:check
+
+      - name: 代码规范检查（Checkstyle）
+        run: mvn -B checkstyle:check
+
+      - name: 上传覆盖率报告（仅报告，不设门槛）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-reports
+          path: '**/target/site/jacoco/**'
+          if-no-files-found: ignore
+
+      - name: 打包（跳过测试，前面已跑过）
+        run: mvn -B -DskipTests package

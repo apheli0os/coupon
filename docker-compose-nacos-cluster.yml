@@ -1,0 +1,75 @@
+# Nacos 3 节点集群（生产/云环境用，本地 8GB 不启动）
+# 前提：MySQL 已初始化 nacos_config 库（docker/ha/nacos/mysql-schema.sql）
+# 启动：docker compose -f docker-compose-nacos-cluster.yml up -d
+# 应用侧地址：NACOS_ADDR=nacos-1:8848,nacos-2:8848,nacos-3:8848
+
+services:
+  nacos-1:
+    image: nacos/nacos-server:v2.3.2
+    container_name: mall-ha-nacos-1
+    restart: unless-stopped
+    environment:
+      MODE: cluster
+      NACOS_SERVERS: nacos-1:8848 nacos-2:8848 nacos-3:8848
+      SPRING_DATASOURCE_PLATFORM: mysql
+      MYSQL_SERVICE_HOST: mysql-master
+      MYSQL_SERVICE_PORT: 3306
+      MYSQL_SERVICE_DB_NAME: nacos_config
+      MYSQL_SERVICE_USER: root
+      MYSQL_SERVICE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
+      MYSQL_SERVICE_DB_PARAM: "characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&serverTimezone=Asia/Shanghai"
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+    ports:
+      - "18848:8848"
+    networks:
+      - coupon_default
+    mem_limit: 768m
+
+  nacos-2:
+    image: nacos/nacos-server:v2.3.2
+    container_name: mall-ha-nacos-2
+    restart: unless-stopped
+    environment:
+      MODE: cluster
+      NACOS_SERVERS: nacos-1:8848 nacos-2:8848 nacos-3:8848
+      SPRING_DATASOURCE_PLATFORM: mysql
+      MYSQL_SERVICE_HOST: mysql-master
+      MYSQL_SERVICE_PORT: 3306
+      MYSQL_SERVICE_DB_NAME: nacos_config
+      MYSQL_SERVICE_USER: root
+      MYSQL_SERVICE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
+      MYSQL_SERVICE_DB_PARAM: "characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&serverTimezone=Asia/Shanghai"
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+    ports:
+      - "18849:8848"
+    networks:
+      - coupon_default
+    mem_limit: 768m
+
+  nacos-3:
+    image: nacos/nacos-server:v2.3.2
+    container_name: mall-ha-nacos-3
+    restart: unless-stopped
+    environment:
+      MODE: cluster
+      NACOS_SERVERS: nacos-1:8848 nacos-2:8848 nacos-3:8848
+      SPRING_DATASOURCE_PLATFORM: mysql
+      MYSQL_SERVICE_HOST: mysql-master
+      MYSQL_SERVICE_PORT: 3306
+      MYSQL_SERVICE_DB_NAME: nacos_config
+      MYSQL_SERVICE_USER: root
+      MYSQL_SERVICE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
+      MYSQL_SERVICE_DB_PARAM: "characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&serverTimezone=Asia/Shanghai"
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+    ports:
+      - "18850:8848"
+    networks:
+      - coupon_default
+    mem_limit: 768m
+
+networks:
+  coupon_default:
+    external: true

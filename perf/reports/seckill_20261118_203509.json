@@ -1,0 +1,85 @@
+{
+  "meta": {
+    "scenario": "seckill",
+    "target": "http://localhost:8082",
+    "users": 300,
+    "duration_sec": 20.39,
+    "ramp_sec": 8.0,
+    "timestamp": "2026-11-18T20:35:09"
+  },
+  "summary": {
+    "total_requests": 37732,
+    "avg_qps": 1850.6,
+    "peak_qps": 3829,
+    "success": 1704,
+    "success_rate_pct": 4.52,
+    "expected_rejects": 0,
+    "http_5xx": 0,
+    "timeouts": 0,
+    "network_errors": 299,
+    "http_2xx": 37433
+  },
+  "latency_ms": {
+    "min": 0.58,
+    "avg": 127.29,
+    "p50": 29.59,
+    "p90": 45.92,
+    "p95": 479.14,
+    "p99": 3029.27,
+    "max": 3511.27
+  },
+  "biz_codes": {
+    "500:SYSTEM_ERROR": 35729,
+    "0:SUCCESS": 1704,
+    "-1:UNKNOWN": 299
+  },
+  "http_codes": {
+    "0": 299,
+    "200": 37433
+  },
+  "qps_timeline": {
+    "613969": 64,
+    "613970": 1788,
+    "613971": 3188,
+    "613972": 3403,
+    "613973": 3380,
+    "613974": 3318,
+    "613975": 3445,
+    "613976": 3557,
+    "613977": 3829,
+    "613978": 3708,
+    "613979": 2955,
+    "613980": 2292,
+    "613981": 1394,
+    "613982": 578,
+    "613983": 86,
+    "613984": 85,
+    "613985": 88,
+    "613986": 89,
+    "613987": 83,
+    "613988": 84,
+    "613989": 318
+  },
+  "error_samples": [
+    "ServerDisconnectedError: Server disconnected uid=2000085",
+    "ServerDisconnectedError: Server disconnected uid=2000053",
+    "ServerDisconnectedError: Server disconnected uid=2000091",
+    "ServerDisconnectedError: Server disconnected uid=2000084",
+    "ServerDisconnectedError: Server disconnected uid=2000030",
+    "ServerDisconnectedError: Server disconnected uid=2000125",
+    "ServerDisconnectedError: Server disconnected uid=2000124",
+    "ServerDisconnectedError: Server disconnected uid=2000267",
+    "ServerDisconnectedError: Server disconnected uid=2000005",
+    "ServerDisconnectedError: Server disconnected uid=2000274",
+    "ServerDisconnectedError: Server disconnected uid=2000185",
+    "ServerDisconnectedError: Server disconnected uid=2000143",
+    "ServerDisconnectedError: Server disconnected uid=2000169",
+    "ServerDisconnectedError: Server disconnected uid=2000144",
+    "ServerDisconnectedError: Server disconnected uid=2000087",
+    "ServerDisconnectedError: Server disconnected uid=2000119",
+    "ServerDisconnectedError: Server disconnected uid=2000108",
+    "ServerDisconnectedError: Server disconnected uid=2000261",
+    "ServerDisconnectedError: Server disconnected uid=2000145",
+    "ServerDisconnectedError: Server disconnected uid=2000242"
+  ]
+}

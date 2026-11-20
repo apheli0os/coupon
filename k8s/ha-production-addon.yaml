@@ -1,0 +1,102 @@
+# 生产级高可用增强清单（多机 K8s 集群使用，本地 8GB 环境不部署）
+# 用法：kubectl apply -f k8s/ha-production-addon.yaml
+# 前提：已 apply namespace-configmap.yaml + deployments.yaml + services-hpa-ingress.yaml
+# 增强点：Pod 反亲和（跨节点打散）+ PDB（主动驱逐保护）+ NetworkPolicy（东西向隔离）
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: coupon-service-pdb
+  namespace: mall
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: coupon-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: seckill-service-pdb
+  namespace: mall
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: seckill-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: order-service-pdb
+  namespace: mall
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: order-service
+---
+# 默认拒绝业务命名空间的东西向流量，只放行必要端口与同命名空间互通
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mall-default-deny
+  namespace: mall
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8081
+        - protocol: TCP
+          port: 8082
+        - protocol: TCP
+          port: 8083
+---
+# 示例：给秒杀 Deployment 打反亲和补丁所需的拓扑分布约束，直接 apply 到已有 Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seckill-service-ha
+  namespace: mall
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: seckill-service-ha
+  template:
+    metadata:
+      labels:
+        app: seckill-service-ha
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - seckill-service-ha
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: seckill-service
+          image: registry.example.com/mall/seckill-service:1.0.0
+          ports:
+            - containerPort: 8082
+          envFrom:
+            - configMapRef:
+                name: mall-common-config
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi

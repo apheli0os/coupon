@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mall
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mall-common-config
+  namespace: mall
+data:
+  NACOS_ADDR: "nacos.mall.svc.cluster.local:8848"
+  REDIS_HOST: "redis.mall.svc.cluster.local"
+  REDIS_PORT: "6379"
+  KAFKA_BOOTSTRAP: "kafka.mall.svc.cluster.local:9092"
+  JWT_SECRET: "please-replace-with-k8s-secret-in-production"

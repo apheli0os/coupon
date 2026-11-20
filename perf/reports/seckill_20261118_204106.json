@@ -1,0 +1,86 @@
+{
+  "meta": {
+    "scenario": "seckill",
+    "target": "http://localhost:8082",
+    "users": 300,
+    "duration_sec": 20.4,
+    "ramp_sec": 6.0,
+    "timestamp": "2026-11-18T20:41:06"
+  },
+  "summary": {
+    "total_requests": 66682,
+    "avg_qps": 3269.0,
+    "peak_qps": 3860,
+    "success": 10000,
+    "success_rate_pct": 15.0,
+    "expected_rejects": 56444,
+    "http_5xx": 0,
+    "timeouts": 0,
+    "network_errors": 238,
+    "http_2xx": 66444
+  },
+  "latency_ms": {
+    "min": 4.73,
+    "avg": 76.39,
+    "p50": 80.79,
+    "p90": 93.23,
+    "p95": 97.51,
+    "p99": 149.38,
+    "max": 355.81
+  },
+  "biz_codes": {
+    "2004:SECKILL_SOLD_OUT": 29635,
+    "429:RATE_LIMITED": 26809,
+    "0:SUCCESS": 10000,
+    "-1:UNKNOWN": 238
+  },
+  "http_codes": {
+    "0": 238,
+    "200": 66444
+  },
+  "qps_timeline": {
+    "614326": 620,
+    "614327": 3538,
+    "614328": 3001,
+    "614329": 2957,
+    "614330": 3249,
+    "614331": 3306,
+    "614332": 3545,
+    "614333": 3860,
+    "614334": 3591,
+    "614335": 3657,
+    "614336": 3521,
+    "614337": 3181,
+    "614338": 3235,
+    "614339": 3211,
+    "614340": 3085,
+    "614341": 3436,
+    "614342": 3587,
+    "614343": 3605,
+    "614344": 3387,
+    "614345": 3719,
+    "614346": 1391
+  },
+  "error_samples": [
+    "UNEXPECTED RuntimeError: Connection closed.",
+    "UNEXPECTED RuntimeError: Connection closed.",
+    "UNEXPECTED RuntimeError: Connection closed.",
+    "ClientConnectionError: Connector is closed. uid=2000162",
+    "ClientConnectionError: Connector is closed. uid=2000161",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000052",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000158",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000159",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000157",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000155",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000028",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000152",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000056",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000151",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000146",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000048",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000150",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000036",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000142",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000147"
+  ]
+}

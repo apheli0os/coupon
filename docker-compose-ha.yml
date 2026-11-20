@@ -1,0 +1,260 @@
+# 本地高可用验证环境：MySQL 主从 / Redis 哨兵 / Kafka 3 broker
+# 前提：WSL2 memory=8GB（.wslconfig），各组件已设内存上限，总预算约 5GB
+# 启动：docker compose -f docker-compose-ha.yml up -d
+# 停止：docker compose -f docker-compose-ha.yml down
+# 注意：端口与现有 coupon-bench-* 完全隔离，可并存
+
+services:
+  # ==================== MySQL 主从 ====================
+  mysql-master:
+    image: mysql:8.0
+    container_name: mall-ha-mysql-master
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
+      TZ: Asia/Shanghai
+    ports:
+      - "13308:3306"
+    volumes:
+      - ha-mysql-master:/var/lib/mysql
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+      - ./docker/ha/mysql/master-init.sql:/docker-entrypoint-initdb.d/01-repl.sql:ro
+    command: >-
+      --server-id=1
+      --log-bin=mysql-bin
+      --binlog-format=ROW
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+      --default-time-zone=+08:00
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --innodb-buffer-pool-size=256M
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p\"$$MYSQL_ROOT_PASSWORD\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    mem_limit: 768m
+
+  mysql-slave:
+    image: mysql:8.0
+    container_name: mall-ha-mysql-slave
+    restart: unless-stopped
+    depends_on:
+      mysql-master:
+        condition: service_healthy
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
+      TZ: Asia/Shanghai
+    ports:
+      - "13309:3306"
+    volumes:
+      - ha-mysql-slave:/var/lib/mysql
+      # 从库不执行建表脚本，数据全靠 binlog 从主库同步
+      - ./docker/ha/mysql/slave-init.sql:/docker-entrypoint-initdb.d/00-repl.sql:ro
+    command: >-
+      --server-id=2
+      --relay-log=relay-bin
+      --log-bin=mysql-bin
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+      --read-only=ON
+      --skip-slave-start=OFF
+      --default-time-zone=+08:00
+      --innodb-buffer-pool-size=256M
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p\"$$MYSQL_ROOT_PASSWORD\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    mem_limit: 768m
+
+  # ==================== Redis 主从 + 哨兵 ====================
+  redis-master:
+    image: redis:7.2-alpine
+    container_name: mall-ha-redis-master
+    restart: unless-stopped
+    ports:
+      - "16381:6379"
+    volumes:
+      - ./docker/ha/redis/redis-master.conf:/etc/redis/redis.conf:ro
+      - ha-redis-master:/data
+    command: ["redis-server", "/etc/redis/redis.conf"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-mallRedis2026}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 320m
+
+  redis-slave:
+    image: redis:7.2-alpine
+    container_name: mall-ha-redis-slave
+    restart: unless-stopped
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    ports:
+      - "16382:6379"
+    volumes:
+      - ./docker/ha/redis/redis-slave.conf.tpl:/etc/redis/redis.conf.tpl:ro
+      - ./docker/ha/redis/redis-slave-entry.sh:/usr/local/bin/redis-slave-entry.sh:ro
+      - ha-redis-slave:/data
+    entrypoint: ["sh", "/usr/local/bin/redis-slave-entry.sh"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-mallRedis2026}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 320m
+
+  sentinel-1:
+    image: redis:7.2-alpine
+    container_name: mall-ha-sentinel-1
+    restart: unless-stopped
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    ports:
+      - "26381:26379"
+    volumes:
+      - ./docker/ha/redis/sentinel-26381.conf:/etc/redis/sentinel.conf.tpl:ro
+      - ./docker/ha/redis/sentinel-entry.sh:/usr/local/bin/sentinel-entry.sh:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: ["sh", "/usr/local/bin/sentinel-entry.sh"]
+    mem_limit: 96m
+
+  sentinel-2:
+    image: redis:7.2-alpine
+    container_name: mall-ha-sentinel-2
+    restart: unless-stopped
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    ports:
+      - "26382:26379"
+    volumes:
+      - ./docker/ha/redis/sentinel-26382.conf:/etc/redis/sentinel.conf.tpl:ro
+      - ./docker/ha/redis/sentinel-entry.sh:/usr/local/bin/sentinel-entry.sh:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: ["sh", "/usr/local/bin/sentinel-entry.sh"]
+    mem_limit: 96m
+
+  sentinel-3:
+    image: redis:7.2-alpine
+    container_name: mall-ha-sentinel-3
+    restart: unless-stopped
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    ports:
+      - "26383:26379"
+    volumes:
+      - ./docker/ha/redis/sentinel-26383.conf:/etc/redis/sentinel.conf.tpl:ro
+      - ./docker/ha/redis/sentinel-entry.sh:/usr/local/bin/sentinel-entry.sh:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: ["sh", "/usr/local/bin/sentinel-entry.sh"]
+    mem_limit: 96m
+
+  # ==================== Kafka 3 broker KRaft ====================
+  kafka-1:
+    image: apache/kafka:3.7.2
+    container_name: mall-ha-kafka-1
+    restart: unless-stopped
+    ports:
+      - "19092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    volumes:
+      - ha-kafka-1:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    mem_limit: 700m
+
+  kafka-2:
+    image: apache/kafka:3.7.2
+    container_name: mall-ha-kafka-2
+    restart: unless-stopped
+    ports:
+      - "19093:9092"
+    environment:
+      KAFKA_NODE_ID: 2
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    volumes:
+      - ha-kafka-2:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    mem_limit: 700m
+
+  kafka-3:
+    image: apache/kafka:3.7.2
+    container_name: mall-ha-kafka-3
+    restart: unless-stopped
+    ports:
+      - "19094:9092"
+    environment:
+      KAFKA_NODE_ID: 3
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:9093,2@kafka-2:9093,3@kafka-3:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    volumes:
+      - ha-kafka-3:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    mem_limit: 700m
+
+volumes:
+  ha-mysql-master:
+  ha-mysql-slave:
+  ha-redis-master:
+  ha-redis-slave:
+  ha-kafka-1:
+  ha-kafka-2:
+  ha-kafka-3:

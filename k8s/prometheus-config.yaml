@@ -1,0 +1,33 @@
+# Prometheus 抓取规则片段：合并到 prometheus.yml 的 scrape_configs
+scrape_configs:
+  - job_name: 'mall-services'
+    metrics_path: '/actuator/prometheus'
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - mall
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: replace
+        target_label: app
+
+# 关键告警示例（Alertmanager rules）
+# - alert: SeckillSoldOutSpike
+#   expr: rate(mall_seckill_soldout_total[1m]) > 100
+#   for: 1m
+# - alert: SeckillLatencyHigh
+#   expr: histogram_quantile(0.99, rate(mall_seckill_latency_seconds_bucket[1m])) > 0.5
+#   for: 2m

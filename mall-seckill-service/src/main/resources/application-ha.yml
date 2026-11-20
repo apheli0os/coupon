@@ -1,0 +1,44 @@
+# 高可用 profile：Redis 哨兵 + MySQL 主从 + Kafka 3 副本
+spring:
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        namespace: public
+        fail-fast: false
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:13308/mall_seckill?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:root123456}
+  data:
+    redis:
+      sentinel:
+        master: mallredis
+        nodes: ${REDIS_SENTINELS:127.0.0.1:26381,127.0.0.1:26382,127.0.0.1:26383}
+      password: ${REDIS_PASSWORD:mallRedis2026}
+      database: 0
+      timeout: 3s
+      lettuce:
+        pool:
+          max-active: 32
+          max-idle: 16
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:127.0.0.1:19092,127.0.0.1:19093,127.0.0.1:19094}
+    producer:
+      # HA 环境 3 副本 + min.insync.replicas=2，恢复 acks=all 强可靠
+      acks: all
+      retries: 5
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        # 生产环境去掉攒批的激进参数，用默认 batch 即可
+        request.timeout.ms: 10000
+        delivery.timeout.ms: 30000
+
+# Sentinel 流控规则由 Nacos 动态下发；关闭时回退到 SentinelConfig 的本地规则
+sentinel:
+  nacos:
+    enabled: ${SENTINEL_NACOS_ENABLED:false}
+    server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+    group-id: MALL_SENTINEL_GROUP
+    data-id: ${SENTINEL_DATA_ID:seckill-sentinel-flow.json}

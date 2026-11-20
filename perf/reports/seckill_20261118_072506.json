@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "scenario": "seckill",
+    "target": "http://localhost:8082",
+    "users": 20,
+    "duration_sec": 5.47,
+    "ramp_sec": 1.0,
+    "timestamp": "2026-11-18T07:25:06"
+  },
+  "summary": {
+    "total_requests": 16273,
+    "avg_qps": 2973.0,
+    "peak_qps": 3737,
+    "success": 0,
+    "success_rate_pct": 0.0,
+    "expected_rejects": 0,
+    "http_5xx": 0,
+    "timeouts": 0,
+    "network_errors": 10,
+    "http_2xx": 16263
+  },
+  "latency_ms": {
+    "min": 0.61,
+    "avg": 5.52,
+    "p50": 4.81,
+    "p90": 6.93,
+    "p95": 8.34,
+    "p99": 32.66,
+    "max": 108.61
+  },
+  "biz_codes": {
+    "500:SYSTEM_ERROR": 15758,
+    "9002:MQ_SEND_FAILED": 505,
+    "-1:UNKNOWN": 10
+  },
+  "http_codes": {
+    "0": 10,
+    "200": 16263
+  },
+  "qps_timeline": {
+    "566581": 534,
+    "566582": 3053,
+    "566583": 2959,
+    "566584": 3737,
+    "566585": 3704,
+    "566586": 2286
+  },
+  "error_samples": [
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000000",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000015",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000014",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000004",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000011",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000012",
+    "ClientPayloadError: Response payload is not completed: <TransferEncodingError: 400, message='Not enough data to satisfy transfer length header.'> uid=2000008",
+    "ServerDisconnectedError: Server disconnected uid=2000016",
+    "ServerDisconnectedError: Server disconnected uid=2000018",
+    "ClientConnectionError: Connector is closed. uid=2000001"
+  ]
+}

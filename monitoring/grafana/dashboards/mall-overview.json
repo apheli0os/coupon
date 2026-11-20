@@ -1,0 +1,96 @@
+{
+  "title": "Mall Coupon Platform - Overview",
+  "uid": "mall-overview",
+  "tags": ["mall", "coupon", "seckill"],
+  "timezone": "Asia/Shanghai",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {"from": "now-30m", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "title": "服务健康状态",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 0},
+      "targets": [{"expr": "up{job=\"mall-services\"}", "legendFormat": "{{app}}"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "id": 2,
+      "title": "请求 QPS",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [{"expr": "sum(rate(http_server_requests_seconds_count[1m])) by (app)", "legendFormat": "{{app}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+    },
+    {
+      "id": 3,
+      "title": "P99 延迟",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+      "targets": [{"expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[1m])) by (le, app))", "legendFormat": "{{app}}"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+    },
+    {
+      "id": 4,
+      "title": "5xx 错误率",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [{"expr": "sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[1m])) by (app)", "legendFormat": "{{app}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+    },
+    {
+      "id": 5,
+      "title": "JVM 堆内存使用 (MB)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "targets": [{"expr": "sum(jvm_memory_used_bytes{area=\"heap\"}) by (app) / 1024 / 1024", "legendFormat": "{{app}}"}],
+      "fieldConfig": {"defaults": {"unit": "mbytes"}, "overrides": []}
+    },
+    {
+      "id": 6,
+      "title": "业务：秒杀成功 / 售罄 / 领券成功",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [
+        {"expr": "rate(mall_seckill_success_total[1m])", "legendFormat": "秒杀成功"},
+        {"expr": "rate(mall_seckill_soldout_total[1m])", "legendFormat": "秒杀售罄"},
+        {"expr": "rate(mall_coupon_claim_success_total[1m])", "legendFormat": "领券成功"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+    },
+    {
+      "id": 7,
+      "title": "秒杀业务耗时 P99",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 22},
+      "targets": [{"expr": "histogram_quantile(0.99, rate(mall_seckill_latency_seconds_bucket[1m]))", "legendFormat": "秒杀延迟"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+    },
+    {
+      "id": 8,
+      "title": "Kafka 消费积压",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "targets": [{"expr": "sum by (consumergroup) (kafka_consumer_lag)", "legendFormat": "{{consumergroup}}"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "id": 9,
+      "title": "Redis 从节点数 (HA 应为 1)",
+      "type": "stat",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 30},
+      "targets": [{"expr": "redis_connected_slaves", "legendFormat": "从节点数"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "id": 10,
+      "title": "Kafka ISR 副本数 (HA 应为 3)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+      "targets": [{"expr": "kafka_topic_partition_in_sync_replicas", "legendFormat": "{{topic}}-p{{partition}}"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    }
+  ]
+}

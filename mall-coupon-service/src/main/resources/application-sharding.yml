@@ -1,0 +1,10 @@
+# 分库分表 profile：--spring.profiles.active=sharding
+# ShardingDataSourceConfig 在该 profile 下创建分片 DataSource，故排除 Boot 的单库自动配置
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+
+logging:
+  level:
+    org.apache.shardingsphere: warn

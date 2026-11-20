@@ -1,0 +1,51 @@
+package com.mall.common.constants;
+
+import org.junit.jupiter.api.Test;
+
+import java.util.HashSet;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class RedisKeyTest {
+
+    @Test
+    void couponKeys_shouldShareHashTag() {
+        Long templateId = 12345L;
+        String tag = "{12345}";
+        assertTrue(RedisKey.couponStock(templateId).contains(tag));
+        assertTrue(RedisKey.couponClaimHash(templateId).contains(tag));
+        assertTrue(RedisKey.couponStatus(templateId).contains(tag));
+        assertTrue(RedisKey.couponTemplateCache(templateId).contains(tag));
+    }
+
+    @Test
+    void seckillKeys_shouldShareHashTag() {
+        Long activityId = 67890L;
+        String tag = "{67890}";
+        assertTrue(RedisKey.seckillStockBucket(activityId, 0).contains(tag));
+        assertTrue(RedisKey.seckillStock(activityId).contains(tag));
+        assertTrue(RedisKey.seckillUsers(activityId).contains(tag));
+        assertTrue(RedisKey.seckillStatus(activityId).contains(tag));
+        assertTrue(RedisKey.seckillOrderToken(activityId, 1L).contains(tag));
+    }
+
+    @Test
+    void bucketOf_shouldDistributeAndHandleNegative() {
+        Set<Integer> buckets = new HashSet<>();
+        for (long userId = 0; userId < 1000; userId++) {
+            int b = RedisKey.bucketOf(userId);
+            assertTrue(b >= 0 && b < RedisKey.SECKILL_STOCK_BUCKETS, "桶索引越界: " + b);
+            buckets.add(b);
+        }
+        assertEquals(RedisKey.SECKILL_STOCK_BUCKETS, buckets.size(), "16 个桶应全部被覆盖");
+        assertTrue(RedisKey.bucketOf(-1L) >= 0, "负数 userId 必须映射到有效桶");
+    }
+
+    @Test
+    void luaScripts_shouldExistAsResources() {
+        for (String name : new String[]{"coupon_claim.lua", "coupon_rollback.lua", "seckill.lua", "seckill_rollback.lua"}) {
+            assertNotNull(getClass().getClassLoader().getResource("lua/" + name), "缺少 Lua 脚本: " + name);
+        }
+    }
+}

@@ -1,0 +1,63 @@
+{
+  "meta": {
+    "scenario": "seckill",
+    "target": "http://localhost:8082",
+    "users": 20,
+    "duration_sec": 6.39,
+    "ramp_sec": 1.0,
+    "timestamp": "2026-11-18T07:30:50"
+  },
+  "summary": {
+    "total_requests": 40,
+    "avg_qps": 6.3,
+    "peak_qps": 20,
+    "success": 0,
+    "success_rate_pct": 0.0,
+    "expected_rejects": 0,
+    "http_5xx": 0,
+    "timeouts": 0,
+    "network_errors": 18,
+    "http_2xx": 22
+  },
+  "latency_ms": {
+    "min": 2161.34,
+    "avg": 2789.33,
+    "p50": 2912.95,
+    "p90": 3012.61,
+    "p95": 3020.45,
+    "p99": 3043.18,
+    "max": 3056.55
+  },
+  "biz_codes": {
+    "9002:MQ_SEND_FAILED": 22,
+    "-1:UNKNOWN": 18
+  },
+  "http_codes": {
+    "0": 18,
+    "200": 22
+  },
+  "qps_timeline": {
+    "566927": 20,
+    "566930": 20
+  },
+  "error_samples": [
+    "ServerDisconnectedError: Server disconnected uid=2000012",
+    "ServerDisconnectedError: Server disconnected uid=2000015",
+    "ServerDisconnectedError: Server disconnected uid=2000017",
+    "ServerDisconnectedError: Server disconnected uid=2000002",
+    "ServerDisconnectedError: Server disconnected uid=2000004",
+    "ServerDisconnectedError: Server disconnected uid=2000006",
+    "ServerDisconnectedError: Server disconnected uid=2000009",
+    "ServerDisconnectedError: Server disconnected uid=2000014",
+    "ServerDisconnectedError: Server disconnected uid=2000019",
+    "ServerDisconnectedError: Server disconnected uid=2000011",
+    "ServerDisconnectedError: Server disconnected uid=2000003",
+    "ServerDisconnectedError: Server disconnected uid=2000016",
+    "ServerDisconnectedError: Server disconnected uid=2000005",
+    "ServerDisconnectedError: Server disconnected uid=2000008",
+    "ServerDisconnectedError: Server disconnected uid=2000010",
+    "ServerDisconnectedError: Server disconnected uid=2000013",
+    "ServerDisconnectedError: Server disconnected uid=2000018",
+    "ServerDisconnectedError: Server disconnected uid=2000007"
+  ]
+}

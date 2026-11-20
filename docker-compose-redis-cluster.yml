@@ -1,0 +1,75 @@
+# Redis Cluster 3 主 3 从（扩容路径，本地 8GB 不启动；用于云环境或大数据量场景）
+# 启动：docker compose -f docker-compose-redis-cluster.yml up -d
+# 初始化集群：docker exec mall-redis-cluster-1 redis-cli -a mallRedis2026 --cluster create \
+#   172.29.0.11:6379 172.29.0.12:6379 172.29.0.13:6379 \
+#   172.29.0.14:6379 172.29.0.15:6379 172.29.0.16:6379 \
+#   --cluster-replicas 1 --cluster-yes
+# 应用侧：--spring.profiles.active=cluster
+
+services:
+  redis-1:
+    image: redis:7.2-alpine
+    container_name: mall-redis-cluster-1
+    restart: unless-stopped
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      redis-cluster-net:
+        ipv4_address: 172.29.0.11
+    mem_limit: 320m
+
+  redis-2:
+    image: redis:7.2-alpine
+    container_name: mall-redis-cluster-2
+    restart: unless-stopped
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      redis-cluster-net:
+        ipv4_address: 172.29.0.12
+    mem_limit: 320m
+
+  redis-3:
+    image: redis:7.2-alpine
+    container_name: mall-redis-cluster-3
+    restart: unless-stopped
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      redis-cluster-net:
+        ipv4_address: 172.29.0.13
+    mem_limit: 320m
+
+  redis-4:
+    image: redis:7.2-alpine
+    container_name: mall-redis-cluster-4
+    restart: unless-stopped
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      redis-cluster-net:
+        ipv4_address: 172.29.0.14
+    mem_limit: 320m
+
+  redis-5:
+    image: redis:7.2-alpine
+    container_name: mall-redis-cluster-5
+    restart: unless-stopped
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      redis-cluster-net:
+        ipv4_address: 172.29.0.15
+    mem_limit: 320m
+
+  redis-6:
+    image: redis:7.2-alpine
+    container_name: mall-redis-cluster-6
+    restart: unless-stopped
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      redis-cluster-net:
+        ipv4_address: 172.29.0.16
+    mem_limit: 320m
+
+networks:
+  redis-cluster-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24

@@ -1,0 +1,71 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: mall-gateway
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        namespace: public
+        fail-fast: false
+    gateway:
+      discovery:
+        locator:
+          enabled: false
+      routes:
+        - id: auth-route
+          uri: lb://mall-coupon-service
+          predicates:
+            - Path=/api/auth/**
+        - id: coupon-route
+          uri: lb://mall-coupon-service
+          predicates:
+            - Path=/api/coupon/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 100
+                redis-rate-limiter.burstCapacity: 200
+                key-resolver: "#{@userKeyResolver}"
+        - id: seckill-route
+          uri: lb://mall-seckill-service
+          predicates:
+            - Path=/api/seckill/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                key-resolver: "#{@userKeyResolver}"
+        - id: order-route
+          uri: lb://mall-order-service
+          predicates:
+            - Path=/api/orders/**
+      default-filters:
+        - RemoveRequestHeader=Cookie
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns: "*"
+            allowedMethods: [GET, POST, PUT, DELETE, OPTIONS]
+            allowedHeaders: "*"
+            allowCredentials: true
+            maxAge: 3600
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 3s
+
+mall:
+  jwt:
+    secret: ${JWT_SECRET:mall-coupon-platform-default-secret-key-2026}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,gateway

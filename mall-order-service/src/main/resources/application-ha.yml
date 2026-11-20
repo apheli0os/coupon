@@ -1,0 +1,31 @@
+# 高可用 profile：Redis 哨兵 + MySQL 主从 + Kafka 3 副本
+spring:
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:127.0.0.1:8848}
+        namespace: public
+        fail-fast: false
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:13308/mall_order?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:root123456}
+  data:
+    redis:
+      sentinel:
+        master: mallredis
+        nodes: ${REDIS_SENTINELS:127.0.0.1:26381,127.0.0.1:26382,127.0.0.1:26383}
+      password: ${REDIS_PASSWORD:mallRedis2026}
+      database: 0
+      timeout: 3s
+      lettuce:
+        pool:
+          max-active: 32
+          max-idle: 16
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:127.0.0.1:19092,127.0.0.1:19093,127.0.0.1:19094}
+    consumer:
+      # HA 环境副本充足，消费并发提高；session 超时给 GC 留余量
+      properties:
+        session.timeout.ms: 20000
+        spring.json.trusted.packages: com.mall.common.message
