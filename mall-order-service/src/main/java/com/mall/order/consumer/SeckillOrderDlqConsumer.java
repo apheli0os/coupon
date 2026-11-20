@@ -15,7 +15,8 @@ import org.springframework.stereotype.Component;
 public class SeckillOrderDlqConsumer {
 
     @KafkaListener(topics = CommonConstant.MQ_TOPIC_SECKILL_DLQ,
-            groupId = "seckill-order-dlq-monitor-group")
+            groupId = "seckill-order-dlq-monitor-group",
+            containerFactory = "dlqKafkaListenerContainerFactory")
     public void onMessage(SeckillOrderMessage message) {
         log.error("[DLQ-ALERT] 秒杀订单消息进入死信队列，需人工介入 orderId={} userId={} activityId={} bucket={}",
                 message.getOrderId(), message.getUserId(), message.getActivityId(), message.getStockBucket());

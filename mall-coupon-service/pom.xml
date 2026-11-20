@@ -31,10 +31,14 @@
             <artifactId>mysql-connector-j</artifactId>
             <scope>runtime</scope>
         </dependency>
-        <!-- Flyway 数据库版本管理（Boot BOM 管理版本 9.22.3，MySQL 支持内置） -->
+        <!-- Flyway 9 将 MySQL 方言拆分为独立模块，必须同时引入 flyway-mysql -->
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
         </dependency>
         <dependency>
             <groupId>com.baomidou</groupId>

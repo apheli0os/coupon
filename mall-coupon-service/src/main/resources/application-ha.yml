@@ -43,3 +43,9 @@ sentinel:
     server-addr: ${NACOS_ADDR:127.0.0.1:8848}
     group-id: MALL_SENTINEL_GROUP
     data-id: ${SENTINEL_DATA_ID:coupon-sentinel-flow.json}
+
+# HA 3-broker 集群（min.insync.replicas=2 + acks=all），自动建 topic 必须用 3 副本
+mall:
+  kafka:
+    topic:
+      replicas: ${KAFKA_TOPIC_REPLICAS:3}

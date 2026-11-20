@@ -27,7 +27,10 @@ spec:
             - configMapRef:
                 name: mall-common-config
           env:
+            # auto 模式由 IdGenerator 通过 Redis INCR mod 1024 为每个 Pod 分配唯一雪花节点号
             - name: WORKER_ID
+              value: "auto"
+            - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
@@ -92,6 +95,12 @@ spec:
             - configMapRef:
                 name: mall-common-config
           env:
+            - name: WORKER_ID
+              value: "auto"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             - name: DB_URL
               value: "jdbc:mysql://mysql.mall.svc.cluster.local:3306/mall_seckill?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
             - name: DB_USER
@@ -153,6 +162,12 @@ spec:
             - configMapRef:
                 name: mall-common-config
           env:
+            - name: WORKER_ID
+              value: "auto"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             - name: DB_URL
               value: "jdbc:mysql://mysql.mall.svc.cluster.local:3306/mall_order?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
             - name: DB_USER

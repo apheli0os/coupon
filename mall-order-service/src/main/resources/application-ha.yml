@@ -29,3 +29,9 @@ spring:
       properties:
         session.timeout.ms: 20000
         spring.json.trusted.packages: com.mall.common.message
+
+# HA 3-broker 集群（min.insync.replicas=2 + acks=all），自动建 topic 必须用 3 副本
+mall:
+  kafka:
+    topic:
+      replicas: ${KAFKA_TOPIC_REPLICAS:3}
