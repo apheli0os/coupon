@@ -1,5 +1,6 @@
 # ShardingSphere 原生 YAML（由 YamlShardingSphereDataSourceFactory 加载）
-# user_coupon 按 user_id 分 2 库 × 4 表；coupon_template 是小表，单表留在 ds0
+# user_coupon 按 user_id 分 2 库 × 4 表（库 (id/4)%2、表 id%4，8 张表均匀打满，消除同键 MOD2+MOD4 造成的 50% 空表）
+# coupon_template 是小表，单表留在 ds0
 dataSources:
   ds0:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
@@ -24,20 +25,20 @@ rules:
         databaseStrategy:
           standard:
             shardingColumn: user_id
-            shardingAlgorithmName: coupon-db-mod
+            shardingAlgorithmName: coupon-db-inline
         tableStrategy:
           standard:
             shardingColumn: user_id
-            shardingAlgorithmName: coupon-tbl-mod
+            shardingAlgorithmName: coupon-tbl-inline
     shardingAlgorithms:
-      coupon-db-mod:
-        type: MOD
+      coupon-db-inline:
+        type: INLINE
         props:
-          sharding-count: 2
-      coupon-tbl-mod:
-        type: MOD
+          algorithm-expression: ds${Math.floorMod(user_id.intdiv(4).longValue(), 2)}
+      coupon-tbl-inline:
+        type: INLINE
         props:
-          sharding-count: 4
+          algorithm-expression: user_coupon_${Math.floorMod(user_id.longValue(), 4)}
 
 props:
   sql-show: false

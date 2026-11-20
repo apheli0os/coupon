@@ -49,13 +49,13 @@ kafkaTxTemplate.sendInTransaction(
 ```java
 @Autowired KafkaTransactionTemplate kafkaTxTemplate;
 
-@KafkaListener(topics = "orders", properties = {"ackMode:MANUAL"})
+@KafkaListener(topics = "orders", groupId = "order-eos-group", properties = {"ackMode:MANUAL"})
 public void listen(ConsumerRecord<String, OrderMsg> record) {
-    kafkaTxTemplate.processAndProceed(record, r -> {
+    kafkaTxTemplate.processAndProceed(record, "order-eos-group", r -> {
         orderService.create(r.value());  // 处理：写 DB
         return new ProducerRecord<>("order-confirmed", r.key(), r.value()); // 产出
     });
-    // 事务成功：产出消息 + 消费位移一起提交
+    // 事务成功：产出消息 + 消费位移（sendOffsetsToTransaction）一起提交
     // 事务失败：全部回滚，消息重新消费
 }
 ```

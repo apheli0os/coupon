@@ -7,7 +7,7 @@ appendfsync everysec
 requirepass mallRedis2026
 masterauth mallRedis2026
 maxmemory 256mb
-maxmemory-policy allkeys-lru
+maxmemory-policy noeviction
 replicaof __MASTER_IP__ 6379
 # 从节点 announce 用容器 IP/端口，让同网络内的哨兵能发现它
 replica-announce-ip __SLAVE_IP__

@@ -1,5 +1,8 @@
 # ShardingSphere 原生 YAML（由 YamlShardingSphereDataSourceFactory 加载）
-# seckill_order 按 activity_id 分 2 库 × 4 表；同一活动的数据落在同一分片，唯一索引仍生效
+# seckill_order 改为按 user_id 分 2 库 × 4 表（库 (id/4)%2、表 id%4）：
+# 1) 单场爆款秒杀写入均匀分散到全部 8 张表，消除按 activity_id 分片导致的热点单表；
+# 2) 同一 (activity_id, user_id) 仍落在同一分片，唯一索引 uk_activity_user_active 依然生效；
+# 3) 移除不属于订单域的 seckill_activity 配置。
 dataSources:
   ds0:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
@@ -17,27 +20,25 @@ dataSources:
 rules:
   - !SHARDING
     tables:
-      seckill_activity:
-        actualDataNodes: ds0.seckill_activity
       seckill_order:
         actualDataNodes: ds${0..1}.seckill_order_${0..3}
         databaseStrategy:
           standard:
-            shardingColumn: activity_id
-            shardingAlgorithmName: order-db-mod
+            shardingColumn: user_id
+            shardingAlgorithmName: order-db-inline
         tableStrategy:
           standard:
-            shardingColumn: activity_id
-            shardingAlgorithmName: order-tbl-mod
+            shardingColumn: user_id
+            shardingAlgorithmName: order-tbl-inline
     shardingAlgorithms:
-      order-db-mod:
-        type: MOD
+      order-db-inline:
+        type: INLINE
         props:
-          sharding-count: 2
-      order-tbl-mod:
-        type: MOD
+          algorithm-expression: ds${Math.floorMod(user_id.intdiv(4).longValue(), 2)}
+      order-tbl-inline:
+        type: INLINE
         props:
-          sharding-count: 4
+          algorithm-expression: seckill_order_${Math.floorMod(user_id.longValue(), 4)}
 
 props:
   sql-show: false

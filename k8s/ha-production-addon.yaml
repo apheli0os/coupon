@@ -36,11 +36,13 @@ spec:
     matchLabels:
       app: order-service
 ---
-# 默认拒绝业务命名空间的东西向流量，只放行必要端口与同命名空间互通
+# 默认拒绝跨命名空间直连业务服务：
+# 1) 8081~8083 仅允许同 mall 命名空间内（网关/微服务互调）访问；
+# 2) mall-gateway 的 8080 允许来自 ingress-nginx 命名空间与同命名空间访问。
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: mall-default-deny
+  name: mall-backend-same-namespace-only
   namespace: mall
 spec:
   podSelector: {}
@@ -48,7 +50,7 @@ spec:
     - Ingress
   ingress:
     - from:
-        - namespaceSelector: {}
+        - podSelector: {}
       ports:
         - protocol: TCP
           port: 8080
@@ -58,6 +60,26 @@ spec:
           port: 8082
         - protocol: TCP
           port: 8083
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mall-gateway-ingress-allow
+  namespace: mall
+spec:
+  podSelector:
+    matchLabels:
+      app: mall-gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
 ---
 # 示例：给秒杀 Deployment 打反亲和补丁所需的拓扑分布约束，直接 apply 到已有 Deployment
 apiVersion: apps/v1
@@ -93,6 +115,25 @@ spec:
           envFrom:
             - configMapRef:
                 name: mall-common-config
+          env:
+            - name: WORKER_ID
+              value: "auto"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: DB_URL
+              value: "jdbc:mysql://mysql.mall.svc.cluster.local:3306/mall_seckill?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mall-db-secret
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mall-db-secret
+                  key: password
           resources:
             requests:
               cpu: 500m

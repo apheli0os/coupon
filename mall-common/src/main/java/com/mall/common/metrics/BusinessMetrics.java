@@ -29,7 +29,9 @@ public class BusinessMetrics {
         this.couponClaimSuccess = Counter.builder("mall.coupon.claim.success.total")
                 .description("领券成功数").register(registry);
         this.seckillLatency = Timer.builder(PREFIX + "latency")
-                .description("秒杀请求耗时").register(registry);
+                .description("秒杀请求耗时")
+                .publishPercentileHistogram()
+                .register(registry);
     }
 
     public void recordSuccess() { seckillSuccess.increment(); }

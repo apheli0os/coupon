@@ -23,10 +23,19 @@ public class RedisConfig {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
 
+        // 收紧多态反序列化白名单：仅允许项目实体与必要 JDK 值类型，避免开放 Object.class 引发反序列化风险
+        BasicPolymorphicTypeValidator typeValidator = BasicPolymorphicTypeValidator.builder()
+                .allowIfBaseType("com.mall.")
+                .allowIfSubType("com.mall.")
+                .allowIfSubType("java.util.")
+                .allowIfSubType("java.time.")
+                .allowIfSubType("java.math.")
+                .build();
+
         ObjectMapper mapper = JsonMapper.builder()
                 .findAndAddModules()
                 .activateDefaultTyping(
-                        BasicPolymorphicTypeValidator.builder().allowIfSubType(Object.class).build(),
+                        typeValidator,
                         ObjectMapper.DefaultTyping.NON_FINAL,
                         JsonTypeInfo.As.PROPERTY)
                 .build();

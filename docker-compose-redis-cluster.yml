@@ -11,7 +11,7 @@ services:
     image: redis:7.2-alpine
     container_name: mall-redis-cluster-1
     restart: unless-stopped
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy noeviction
     networks:
       redis-cluster-net:
         ipv4_address: 172.29.0.11
@@ -21,7 +21,7 @@ services:
     image: redis:7.2-alpine
     container_name: mall-redis-cluster-2
     restart: unless-stopped
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy noeviction
     networks:
       redis-cluster-net:
         ipv4_address: 172.29.0.12
@@ -31,7 +31,7 @@ services:
     image: redis:7.2-alpine
     container_name: mall-redis-cluster-3
     restart: unless-stopped
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy noeviction
     networks:
       redis-cluster-net:
         ipv4_address: 172.29.0.13
@@ -41,7 +41,7 @@ services:
     image: redis:7.2-alpine
     container_name: mall-redis-cluster-4
     restart: unless-stopped
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy noeviction
     networks:
       redis-cluster-net:
         ipv4_address: 172.29.0.14
@@ -51,7 +51,7 @@ services:
     image: redis:7.2-alpine
     container_name: mall-redis-cluster-5
     restart: unless-stopped
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy noeviction
     networks:
       redis-cluster-net:
         ipv4_address: 172.29.0.15
@@ -61,7 +61,7 @@ services:
     image: redis:7.2-alpine
     container_name: mall-redis-cluster-6
     restart: unless-stopped
-    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --requirepass ${REDIS_PASSWORD:-mallRedis2026} --masterauth ${REDIS_PASSWORD:-mallRedis2026} --maxmemory 256mb --maxmemory-policy noeviction
     networks:
       redis-cluster-net:
         ipv4_address: 172.29.0.16

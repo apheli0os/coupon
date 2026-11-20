@@ -30,7 +30,9 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    # 库存/防重实例必须用 noeviction，防止内存紧张时误淘汰库存或已购用户 Set 引发超卖；
+    # 所有活动 key 均已配置活动结束后 7 天自动过期 TTL
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

@@ -70,3 +70,7 @@ management:
       exposure:
         # 严禁暴露 gateway 端点（GlobalFilter 不拦截 Actuator，暴露会允许无鉴权篡改路由）
         include: health,info,metrics
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
