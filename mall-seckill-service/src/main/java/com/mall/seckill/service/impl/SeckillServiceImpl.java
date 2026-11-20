@@ -92,10 +92,12 @@ public class SeckillServiceImpl implements SeckillService {
 
         String orderId = idGenerator.nextIdStr();
         String tokenKey = RedisKey.seckillOrderToken(activityId, userId);
+        boolean tokenWritten = false;
         try {
-            // 本地凭证：消费端据此判定消息有效，避免旧消息误落单
+            // 本地凭证：消费端通过 Lua CAS 认领，避免生产端超时回滚后延迟消息仍落单导致超卖
             stringRedisTemplate.opsForValue().set(tokenKey, orderId,
                     Duration.ofSeconds(RedisKey.TOKEN_TTL_SECONDS));
+            tokenWritten = true;
 
             SeckillOrderMessage message = new SeckillOrderMessage();
             message.setOrderId(orderId);
@@ -114,12 +116,16 @@ public class SeckillServiceImpl implements SeckillService {
             log.debug("秒杀订单消息已投递 partition={} offset={} orderId={}",
                     metadata.partition(), metadata.offset(), orderId);
         } catch (Exception e) {
-            // Kafka 未确认，归还库存并清掉凭证，避免「扣了库存却没订单」
-            rollbackSeckill(activityId, userId, deductedBucket);
-            stringRedisTemplate.delete(tokenKey);
-            log.error("秒杀订单消息发送失败，已回滚库存 activityId={} userId={} orderId={}",
-                    activityId, userId, orderId, e);
-            throw new BizException(ResultCode.MQ_SEND_FAILED);
+            // 通过 token-CAS 回滚：仅当消费端尚未认领凭证时才归还库存；若已被认领则说明消息已送达消费
+            long rollbackCode = rollbackSeckill(activityId, userId, deductedBucket, orderId, tokenWritten);
+            if (rollbackCode == 2L) {
+                log.warn("Kafka 发送确认超时但消费端已认领该订单，保留扣减并返回成功 orderId={} activityId={} userId={}",
+                        orderId, activityId, userId);
+            } else {
+                log.error("秒杀订单消息发送失败，已回滚库存 activityId={} userId={} orderId={}",
+                        activityId, userId, orderId, e);
+                throw new BizException(ResultCode.MQ_SEND_FAILED);
+            }
         }
 
         // 销量计数已下移到 SeckillSoldConsumer（Kafka 异步），请求线程不碰 DB
@@ -139,13 +145,27 @@ public class SeckillServiceImpl implements SeckillService {
         throw new BizException(ResultCode.TOO_MANY_REQUESTS);
     }
 
-    private void rollbackSeckill(Long activityId, long userId, int bucket) {
+    private long rollbackSeckill(Long activityId, long userId, int bucket, String orderId, boolean tokenWritten) {
         try {
-            luaExecutor.execute(LuaScriptExecutor.SCRIPT_SECKILL_ROLLBACK,
+            if (tokenWritten) {
+                long[] res = luaExecutor.parse(luaExecutor.execute(
+                        LuaScriptExecutor.SCRIPT_SECKILL_ROLLBACK,
+                        List.of(
+                                RedisKey.seckillStockBucket(activityId, bucket),
+                                RedisKey.seckillUsers(activityId),
+                                RedisKey.seckillOrderToken(activityId, userId)),
+                        String.valueOf(userId),
+                        orderId));
+                return res[0];
+            }
+            long[] res = luaExecutor.parse(luaExecutor.execute(
+                    LuaScriptExecutor.SCRIPT_SECKILL_ROLLBACK,
                     List.of(RedisKey.seckillStockBucket(activityId, bucket), RedisKey.seckillUsers(activityId)),
-                    String.valueOf(userId));
+                    String.valueOf(userId)));
+            return res[0];
         } catch (Exception ex) {
-            log.error("秒杀补偿失败 activityId={} userId={} 需人工对账", activityId, userId, ex);
+            log.error("秒杀补偿失败 activityId={} userId={} orderId={} 需人工对账", activityId, userId, orderId, ex);
+            return -99L;
         }
     }
 

@@ -85,7 +85,7 @@ def main() -> None:
         f"SELECT COUNT(*) FROM mall_order.seckill_order WHERE activity_id={a.activity_id};") or 0)
     dup_orders = int(mysql_scalar(
         f"SELECT COUNT(*) FROM (SELECT user_id FROM mall_order.seckill_order "
-        f"WHERE activity_id={a.activity_id} GROUP BY user_id HAVING COUNT(*)>1) t;") or 0)
+        f"WHERE activity_id={a.activity_id} AND status != 2 GROUP BY user_id HAVING COUNT(*)>1) t;") or 0)
     dup_coupons = int(mysql_scalar(
         f"SELECT COUNT(*) FROM (SELECT user_id FROM mall_coupon.user_coupon "
         f"WHERE template_id={a.template_id} GROUP BY user_id HAVING COUNT(*)>1) t;") or 0)

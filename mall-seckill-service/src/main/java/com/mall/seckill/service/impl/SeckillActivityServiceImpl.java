@@ -17,6 +17,7 @@ import org.redisson.api.RedissonClient;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -33,6 +34,7 @@ public class SeckillActivityServiceImpl implements SeckillActivityService {
     private final RedissonClient redissonClient;
     private final IdGenerator idGenerator;
     private final MultiLevelCache multiLevelCache;
+    private final TransactionTemplate transactionTemplate;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -58,8 +60,11 @@ public class SeckillActivityServiceImpl implements SeckillActivityService {
         return activity.getId();
     }
 
+    /**
+     * 分布式锁包裹事务（锁在外、TransactionTemplate 在内），确保 DB 提交后再释放锁；
+     * 对已处于进行中且 Redis 库存桶已预热的活动仅做幂等刷新，绝不重置分桶库存或清空已购用户 Set。
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void publish(Long activityId) {
         RLock lock = redissonClient.getLock(RedisKey.seckillActivityLock(activityId));
         boolean locked = false;
@@ -68,20 +73,47 @@ public class SeckillActivityServiceImpl implements SeckillActivityService {
             if (!locked) {
                 throw new BizException(ResultCode.LOCK_ACQUIRE_FAILED);
             }
-            SeckillActivity activity = activityMapper.selectById(activityId);
-            if (activity == null) {
-                throw new BizException(ResultCode.SECKILL_ACTIVITY_NOT_FOUND);
-            }
             LocalDateTime now = LocalDateTime.now();
-            if (now.isAfter(activity.getEndTime())) {
-                throw new BizException(ResultCode.PARAM_ERROR, "活动已结束，无法发布");
+            PublishContext ctx = transactionTemplate.execute(txStatus -> {
+                SeckillActivity activity = activityMapper.selectById(activityId);
+                if (activity == null) {
+                    throw new BizException(ResultCode.SECKILL_ACTIVITY_NOT_FOUND);
+                }
+                if (now.isAfter(activity.getEndTime())) {
+                    throw new BizException(ResultCode.PARAM_ERROR, "活动已结束，无法发布");
+                }
+                int prevStatus = activity.getStatus() == null ? 0 : activity.getStatus();
+                int targetStatus = now.isBefore(activity.getStartTime()) ? 0 : 1;
+                activity.setStatus(targetStatus);
+                activity.setUpdateTime(now);
+                activityMapper.updateById(activity);
+                return new PublishContext(activity, prevStatus, targetStatus);
+            });
+            if (ctx == null) {
+                return;
             }
-            int status = now.isBefore(activity.getStartTime()) ? 0 : 1;
-            activity.setStatus(status);
-            activity.setUpdateTime(now);
-            activityMapper.updateById(activity);
+            SeckillActivity activity = ctx.activity();
+            Duration ttl = RedisKey.activityKeyTtl(now, activity.getEndTime());
+            String firstBucketKey = RedisKey.seckillStockBucket(activityId, 0);
+            String statusKey = RedisKey.seckillStatus(activityId);
+            String usersKey = RedisKey.seckillUsers(activityId);
+            String redisStatus = ctx.targetStatus() == 1 ? RedisKey.STATUS_ACTIVE : RedisKey.STATUS_PREHEATED;
 
-            long remain = Math.max(0, activity.getTotalStock() - activity.getSoldCount());
+            boolean alreadyPreheated = Boolean.TRUE.equals(stringRedisTemplate.hasKey(firstBucketKey));
+            if (ctx.prevStatus() == 1 && alreadyPreheated) {
+                // 进行中活动重复发布：严禁覆盖分桶库存与清空 seckillUsers Set
+                stringRedisTemplate.opsForValue().set(statusKey, redisStatus, ttl);
+                for (int i = 0; i < RedisKey.SECKILL_STOCK_BUCKETS; i++) {
+                    stringRedisTemplate.expire(RedisKey.seckillStockBucket(activityId, i), ttl);
+                }
+                stringRedisTemplate.expire(RedisKey.seckillStock(activityId), ttl);
+                stringRedisTemplate.expire(usersKey, ttl);
+                multiLevelCache.invalidate(RedisKey.seckillActivityCache(activityId));
+                log.info("秒杀活动已处于活跃态，幂等刷新状态与TTL activityId={} status={}", activityId, ctx.targetStatus());
+                return;
+            }
+
+            long remain = Math.max(0, activity.getTotalStock() - (activity.getSoldCount() == null ? 0 : activity.getSoldCount()));
             // 库存均分到 N 个桶，余数分给前几个桶，总和严格等于 remain
             int buckets = RedisKey.SECKILL_STOCK_BUCKETS;
             long base = remain / buckets;
@@ -89,15 +121,18 @@ public class SeckillActivityServiceImpl implements SeckillActivityService {
             for (int i = 0; i < buckets; i++) {
                 long bucketStock = base + (i < extra ? 1 : 0);
                 stringRedisTemplate.opsForValue().set(
-                        RedisKey.seckillStockBucket(activityId, i), String.valueOf(bucketStock));
+                        RedisKey.seckillStockBucket(activityId, i), String.valueOf(bucketStock), ttl);
             }
             // 兼容旧的总库存 key，供监控/查询使用
-            stringRedisTemplate.opsForValue().set(RedisKey.seckillStock(activityId), String.valueOf(remain));
-            stringRedisTemplate.opsForValue().set(RedisKey.seckillStatus(activityId),
-                    status == 1 ? RedisKey.STATUS_ACTIVE : "0");
-            stringRedisTemplate.delete(RedisKey.seckillUsers(activityId));
+            stringRedisTemplate.opsForValue().set(RedisKey.seckillStock(activityId), String.valueOf(remain), ttl);
+            stringRedisTemplate.opsForValue().set(statusKey, redisStatus, ttl);
+            if (ctx.prevStatus() == 0 && (activity.getSoldCount() == null || activity.getSoldCount() == 0)) {
+                stringRedisTemplate.delete(usersKey);
+            } else {
+                stringRedisTemplate.expire(usersKey, ttl);
+            }
             multiLevelCache.invalidate(RedisKey.seckillActivityCache(activityId));
-            log.info("秒杀活动发布成功 activityId={} remain={} status={}", activityId, remain, status);
+            log.info("秒杀活动发布成功 activityId={} remain={} status={}", activityId, remain, ctx.targetStatus());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new BizException(ResultCode.LOCK_ACQUIRE_FAILED);
@@ -119,5 +154,8 @@ public class SeckillActivityServiceImpl implements SeckillActivityService {
     public List<SeckillActivity> listAll() {
         return activityMapper.selectList(new LambdaQueryWrapper<SeckillActivity>()
                 .orderByDesc(SeckillActivity::getCreateTime));
+    }
+
+    private record PublishContext(SeckillActivity activity, int prevStatus, int targetStatus) {
     }
 }

@@ -25,6 +25,8 @@ public class SeckillOrder {
     private Integer stockBucket;
     /** 0=待支付 1=已支付 2=已取消 */
     private Integer status;
+    /** 取消后 Redis 库存是否已归还：0=未归还 1=已归还 */
+    private Integer stockRestored;
     private LocalDateTime createTime;
     private LocalDateTime payTime;
 }

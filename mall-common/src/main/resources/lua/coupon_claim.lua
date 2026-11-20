@@ -19,4 +19,10 @@ end
 
 redis.call('DECR', KEYS[1])
 redis.call('HINCRBY', KEYS[2], ARGV[1], 1)
+if redis.call('TTL', KEYS[2]) == -1 then
+  local ttl = redis.call('TTL', KEYS[3])
+  if ttl > 0 then
+    redis.call('EXPIRE', KEYS[2], ttl)
+  end
+end
 return {0, stock - 1}

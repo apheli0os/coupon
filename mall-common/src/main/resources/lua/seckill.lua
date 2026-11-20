@@ -27,6 +27,12 @@ for i = 0, bucketCount - 1 do
   if stock > 0 then
     redis.call('DECR', stockKey)
     redis.call('SADD', KEYS[bucketCount + 1], userId)
+    if redis.call('TTL', KEYS[bucketCount + 1]) == -1 then
+      local ttl = redis.call('TTL', KEYS[bucketCount + 2])
+      if ttl > 0 then
+        redis.call('EXPIRE', KEYS[bucketCount + 1], ttl)
+      end
+    end
     return {0, idx}
   end
 end

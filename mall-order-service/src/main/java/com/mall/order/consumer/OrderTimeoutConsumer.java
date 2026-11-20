@@ -1,23 +1,25 @@
 package com.mall.order.consumer;
 
 import com.mall.common.constants.RedisKey;
-import com.mall.common.util.LuaScriptExecutor;
 import com.mall.order.domain.entity.SeckillOrder;
 import com.mall.order.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
- * 15 分钟未支付自动关单（定时扫描替代 MQ 延迟消息）。
+ * 15 分钟未支付自动关单 + 取消单库存归还补偿任务。
  *
- * <p>Kafka 不提供任意时长延迟队列，改为每 30 秒扫描 status=0 且 create_time 超时的订单，
- * 取消订单并归还「下单时记录的库存桶」，避免 MQ 延迟消息在 Broker 重启后丢失。</p>
+ * <p>1) 多实例部署下通过 Redisson 分布式锁协调，避免并发争抢同一批订单；
+ * 2) 每轮循环排空超时订单（上限 20 批），避免大促后每 30s 仅关 100 单造成积压；
+ * 3) 额外扫描 status=2 且 stock_restored=0 的取消单，兜底补偿因 Redis 闪断/进程宕机未归还的库存。</p>
  */
 @Slf4j
 @Component
@@ -26,31 +28,62 @@ public class OrderTimeoutConsumer {
 
     private static final long TIMEOUT_MINUTES = 15;
     private static final int BATCH_SIZE = 100;
+    private static final int MAX_LOOPS_PER_TICK = 20;
 
     private final OrderService orderService;
-    private final StringRedisTemplate stringRedisTemplate;
-    private final LuaScriptExecutor luaExecutor;
+    private final RedissonClient redissonClient;
 
     @Scheduled(fixedDelayString = "${mall.order.timeout-scan-ms:30000}", initialDelay = 30000)
     public void scanTimeoutOrders() {
-        LocalDateTime threshold = LocalDateTime.now().minusMinutes(TIMEOUT_MINUTES);
-        List<SeckillOrder> expired = orderService.findExpiredUnpaid(threshold, BATCH_SIZE);
-        for (SeckillOrder order : expired) {
-            try {
-                if (!orderService.cancelBySystem(order.getOrderId())) {
-                    continue;
-                }
-                int bucket = order.getStockBucket() == null ? 0 : order.getStockBucket();
-                luaExecutor.execute(LuaScriptExecutor.SCRIPT_SECKILL_ROLLBACK,
-                        List.of(RedisKey.seckillStockBucket(order.getActivityId(), bucket),
-                                RedisKey.seckillUsers(order.getActivityId())),
-                        String.valueOf(order.getUserId()));
-                stringRedisTemplate.delete(
-                        RedisKey.seckillOrderToken(order.getActivityId(), order.getUserId()));
-                log.info("超时关单并归还库存成功 orderId={} bucket={}", order.getOrderId(), bucket);
-            } catch (Exception e) {
-                log.error("超时关单失败 orderId={} 将在下轮重试", order.getOrderId(), e);
+        RLock lock = redissonClient.getLock(RedisKey.orderTimeoutJobLock());
+        boolean locked = false;
+        try {
+            // 使用 watchdog 自动续期（不指定 leaseTime），避免大批量处理时锁提前过期
+            locked = lock.tryLock(0, TimeUnit.SECONDS);
+            if (!locked) {
+                return;
+            }
+            drainExpiredUnpaid();
+            drainPendingStockRestores();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            if (locked && lock.isHeldByCurrentThread()) {
+                lock.unlock();
             }
         }
+    }
+
+    private void drainExpiredUnpaid() {
+        LocalDateTime threshold = LocalDateTime.now().minusMinutes(TIMEOUT_MINUTES);
+        int loops = 0;
+        List<SeckillOrder> expired;
+        do {
+            expired = orderService.findExpiredUnpaid(threshold, BATCH_SIZE);
+            for (SeckillOrder order : expired) {
+                try {
+                    orderService.cancelBySystem(order.getOrderId());
+                } catch (Exception e) {
+                    log.error("超时关单失败 orderId={} 将在下轮重试", order.getOrderId(), e);
+                }
+            }
+            loops++;
+        } while (expired.size() == BATCH_SIZE && loops < MAX_LOOPS_PER_TICK);
+    }
+
+    private void drainPendingStockRestores() {
+        int loops = 0;
+        List<SeckillOrder> pending;
+        do {
+            pending = orderService.findPendingStockRestore(BATCH_SIZE);
+            for (SeckillOrder order : pending) {
+                try {
+                    orderService.restoreStockForCancelledOrder(order);
+                } catch (Exception e) {
+                    log.error("补偿归还取消单库存失败 orderId={} 将在下轮重试", order.getOrderId(), e);
+                }
+            }
+            loops++;
+        } while (pending.size() == BATCH_SIZE && loops < MAX_LOOPS_PER_TICK);
     }
 }

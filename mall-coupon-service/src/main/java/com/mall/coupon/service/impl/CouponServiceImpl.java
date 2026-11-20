@@ -30,6 +30,7 @@ import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -102,7 +103,14 @@ public class CouponServiceImpl implements CouponService {
         LocalDateTime validUntil = now.plusDays(template.getValidDays());
         message.setExpireTime(validUntil.isAfter(template.getEndTime()) ? template.getEndTime() : validUntil);
 
+        String tokenKey = RedisKey.couponClaimToken(templateId, userCouponId);
+        boolean tokenWritten = false;
         try {
+            // 写入落库凭证：消费端 CAS 认领，防止发送超时回滚后延迟消息仍落库超发
+            stringRedisTemplate.opsForValue().set(tokenKey, String.valueOf(userCouponId),
+                    Duration.ofSeconds(RedisKey.TOKEN_TTL_SECONDS));
+            tokenWritten = true;
+
             // 以 userCouponId 作为分区键：同一张券顺序一致，且天然打散到各分区
             SendResult<String, Object> result = kafkaTemplate.send(
                     CommonConstant.MQ_TOPIC_COUPON_CLAIM,
@@ -111,10 +119,15 @@ public class CouponServiceImpl implements CouponService {
             log.debug("领券消息已投递 topic={} partition={} offset={} userId={} couponId={}",
                     metadata.topic(), metadata.partition(), metadata.offset(), userId, userCouponId);
         } catch (Exception e) {
-            // 消息没落地，必须归还 Redis 预扣，否则出现「扣了库存却没有券」
-            rollbackClaim(templateId, userId);
-            log.error("领券消息发送失败，已回滚预扣 templateId={} userId={}", templateId, userId, e);
-            throw new BizException(ResultCode.MQ_SEND_FAILED);
+            long rollbackCode = rollbackClaim(templateId, userId, userCouponId, tokenWritten);
+            if (rollbackCode == 2L) {
+                log.warn("领券消息确认超时但消费端已认领，保留扣减 templateId={} userId={} couponId={}",
+                        templateId, userId, userCouponId);
+            } else {
+                log.error("领券消息发送失败，已回滚预扣 templateId={} userId={} couponId={}",
+                        templateId, userId, userCouponId, e);
+                throw new BizException(ResultCode.MQ_SEND_FAILED);
+            }
         }
 
         metrics.recordCouponClaim();
@@ -126,14 +139,28 @@ public class CouponServiceImpl implements CouponService {
         throw new BizException(ResultCode.TOO_MANY_REQUESTS);
     }
 
-    private void rollbackClaim(Long templateId, long userId) {
+    private long rollbackClaim(Long templateId, long userId, long userCouponId, boolean tokenWritten) {
         try {
-            luaExecutor.execute(LuaScriptExecutor.SCRIPT_COUPON_ROLLBACK,
+            if (tokenWritten) {
+                long[] res = luaExecutor.parse(luaExecutor.execute(
+                        LuaScriptExecutor.SCRIPT_COUPON_ROLLBACK,
+                        List.of(
+                                RedisKey.couponStock(templateId),
+                                RedisKey.couponClaimHash(templateId),
+                                RedisKey.couponClaimToken(templateId, userCouponId)),
+                        String.valueOf(userId),
+                        String.valueOf(userCouponId)));
+                return res[0];
+            }
+            long[] res = luaExecutor.parse(luaExecutor.execute(
+                    LuaScriptExecutor.SCRIPT_COUPON_ROLLBACK,
                     List.of(RedisKey.couponStock(templateId), RedisKey.couponClaimHash(templateId)),
-                    String.valueOf(userId));
+                    String.valueOf(userId)));
+            return res[0];
         } catch (Exception ex) {
             // 补偿失败必须告警，人工介入对账
-            log.error("领券补偿失败 templateId={} userId={}", templateId, userId, ex);
+            log.error("领券补偿失败 templateId={} userId={} couponId={}", templateId, userId, userCouponId, ex);
+            return -99L;
         }
     }
 

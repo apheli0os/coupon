@@ -15,6 +15,9 @@ public interface OrderService {
     /** 定时扫描超时未支付订单 */
     List<SeckillOrder> findExpiredUnpaid(LocalDateTime threshold, int limit);
 
+    /** 扫描已取消但尚未归还 Redis 库存的订单 */
+    List<SeckillOrder> findPendingStockRestore(int limit);
+
     SeckillOrder findByActivityAndUser(Long activityId, Long userId);
 
     SeckillOrder findByOrderId(String orderId);
@@ -32,6 +35,9 @@ public interface OrderService {
 
     void cancel(String orderId, long userId, boolean isAdmin);
 
-    /** 系统定时关单（无 HTTP 用户上下文） */
+    /** 系统定时关单（无 HTTP 用户上下文，包含库存归还） */
     boolean cancelBySystem(String orderId);
+
+    /** 对已取消订单幂等归还 Redis 库存并回写 stock_restored=1 */
+    void restoreStockForCancelledOrder(SeckillOrder order);
 }
