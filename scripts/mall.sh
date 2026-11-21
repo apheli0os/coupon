@@ -52,6 +52,132 @@ wait_port() {
   return 1
 }
 
+wait_container_healthy() {
+  local label="$1" cname="$2" fallback_port="$3" timeout="${4:-120}"
+  echo "[INFO] 等待 $label ($cname) 健康检查就绪..."
+  local start=$(date +%s)
+  while (( $(date +%s) - start < timeout )); do
+    local st
+    st="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cname" 2>/dev/null || true)"
+    if [[ "$st" == "healthy" ]]; then
+      echo "[ OK ] $label ($cname) healthy"
+      return 0
+    fi
+    if [[ "$st" == "exited" || "$st" == "dead" ]]; then
+      echo "[FAIL] $label ($cname) 容器异常退出 ($st)"
+      return 1
+    fi
+    sleep 2
+  done
+  echo "[WARN] $label ($cname) 在 ${timeout}s 内未达到 healthy，回退检测端口 :$fallback_port"
+  wait_port "$label" "$fallback_port" 10
+}
+
+wait_http_ok() {
+  local label="$1" url="$2" timeout="${3:-120}"
+  echo "[INFO] 等待 $label ($url) 就绪..."
+  local start=$(date +%s)
+  while (( $(date +%s) - start < timeout )); do
+    if curl --noproxy '*' -sf --max-time 3 "$url" >/dev/null 2>&1; then
+      echo "[ OK ] $label 已就绪"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "[WARN] $label ($url) 在 ${timeout}s 内未就绪"
+  return 1
+}
+
+port_in_use() {
+  local p="$1"
+  (echo >"/dev/tcp/127.0.0.1/$p") >/dev/null 2>&1
+}
+
+get_container_host_port() {
+  local cname="$1" cport="$2"
+  local running
+  running="$(docker inspect -f '{{.State.Running}}' "$cname" 2>/dev/null || true)"
+  if [[ "$running" == "true" ]]; then
+    local mapped
+    mapped="$(docker port "$cname" "${cport}/tcp" 2>/dev/null | head -n1 || true)"
+    if [[ "$mapped" =~ :([0-9]+)$ ]]; then
+      echo "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+find_free_port() {
+  for p in "$@"; do
+    if ! port_in_use "$p"; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+save_ports_env() {
+  local ports_file="$RUN_DIR/ports.env"
+  printf 'MYSQL_PORT=%s\nREDIS_PORT=%s\nNACOS_PORT=%s\nNACOS_GRPC_PORT=%s\nNACOS_RAFT_PORT=%s\nNACOS_ADDR=%s\n' \
+    "$MYSQL_PORT" "$REDIS_PORT" "$NACOS_PORT" "$NACOS_GRPC_PORT" "$NACOS_RAFT_PORT" "$NACOS_ADDR" >"$ports_file"
+}
+
+set_nacos_port_env() {
+  local main_port="$1"
+  export NACOS_PORT="$main_port"
+  export NACOS_GRPC_PORT="$((main_port + 1000))"
+  export NACOS_RAFT_PORT="$((main_port + 1001))"
+  export NACOS_ADDR="127.0.0.1:${main_port}"
+}
+
+resolve_dev_ports() {
+  [[ "$PROFILE" != "dev" ]] && return 0
+  local ports_file="$RUN_DIR/ports.env"
+  if [[ "$SKIP_DOCKER" == "true" && -f "$ports_file" ]]; then
+    # shellcheck disable=SC1090
+    source "$ports_file"
+  fi
+  if [[ -z "${MYSQL_PORT:-}" ]]; then
+    if existing="$(get_container_host_port mall-mysql 3306 2>/dev/null)"; then
+      export MYSQL_PORT="$existing"
+    elif [[ "$SKIP_DOCKER" == "false" ]] && port_in_use 3306; then
+      MYSQL_PORT="$(find_free_port 13306 13316 23306)"
+      export MYSQL_PORT
+      echo "[WARN] 检测到本机 :3306 已被占用，自动将 Docker MySQL 端口切换为 127.0.0.1:${MYSQL_PORT}"
+    else
+      export MYSQL_PORT=3306
+    fi
+  fi
+  if [[ -z "${REDIS_PORT:-}" ]]; then
+    if existing="$(get_container_host_port mall-redis 6379 2>/dev/null)"; then
+      export REDIS_PORT="$existing"
+    elif [[ "$SKIP_DOCKER" == "false" ]] && port_in_use 6379; then
+      REDIS_PORT="$(find_free_port 16379 16380 26379)"
+      export REDIS_PORT
+      echo "[WARN] 检测到本机 :6379 已被占用，自动将 Docker Redis 端口切换为 127.0.0.1:${REDIS_PORT}"
+    else
+      export REDIS_PORT=6379
+    fi
+  fi
+  if [[ -z "${NACOS_PORT:-}" ]]; then
+    if nhttp="$(get_container_host_port mall-nacos 8848 2>/dev/null)" && ngrpc="$(get_container_host_port mall-nacos 9848 2>/dev/null)"; then
+      set_nacos_port_env "$nhttp"
+    elif [[ "$SKIP_DOCKER" == "false" ]] && { port_in_use 8848 || port_in_use 9848; }; then
+      local alt
+      alt="$(find_free_port 18848 28848)"
+      set_nacos_port_env "$alt"
+      echo "[WARN] 检测到本机 :8848/:9848 已被占用，自动将 Docker Nacos 端口切换为 127.0.0.1:${alt} (gRPC :$((alt + 1000)))"
+    else
+      set_nacos_port_env 8848
+    fi
+  else
+    set_nacos_port_env "$NACOS_PORT"
+  fi
+  save_ports_env
+}
+
 check_health() {
   local port="$1"
   curl -sf --max-time 2 "http://127.0.0.1:${port}/actuator/health" | grep -q '"status":"UP"'
@@ -81,6 +207,7 @@ wait_health() {
 
 start_all() {
   mkdir -p "$LOG_DIR"
+  resolve_dev_ports
   if [[ "$SKIP_DOCKER" == "false" ]]; then
     echo "[INFO] 启动 Docker 中间件 ($COMPOSE_FILE)..."
     (cd "$ROOT_DIR" && docker compose -f "$COMPOSE_FILE" up -d)
@@ -89,10 +216,20 @@ start_all() {
       wait_port "Redis Sentinel (HA)" 26381 60 || true
       wait_port "Kafka Broker-1 (HA)" 19092 90 || true
     else
-      wait_port "MySQL" 3306 120 || true
-      wait_port "Redis" 6379 60 || true
-      wait_port "Kafka" 9092 90 || true
-      wait_port "Nacos" 8848 90 || true
+      if ! get_container_host_port mall-nacos 8848 >/dev/null 2>&1 || ! get_container_host_port mall-nacos 9848 >/dev/null 2>&1; then
+        if [[ "$NACOS_PORT" == "8848" ]]; then
+          alt_nacos="$(find_free_port 18848 28848)"
+          set_nacos_port_env "$alt_nacos"
+          save_ports_env
+          echo "[WARN] Nacos 默认端口 :8848/:9848 未能在宿主机映射，自动切换为 127.0.0.1:${alt_nacos}..."
+          (cd "$ROOT_DIR" && docker compose -f "$COMPOSE_FILE" up -d nacos)
+        fi
+      fi
+      wait_container_healthy "MySQL" "mall-mysql" "${MYSQL_PORT:-3306}" 120 || true
+      wait_container_healthy "Redis" "mall-redis" "${REDIS_PORT:-6379}" 60 || true
+      wait_container_healthy "Kafka" "mall-kafka" 9092 120 || true
+      wait_container_healthy "Nacos" "mall-nacos" "${NACOS_PORT:-8848}" 120 || true
+      wait_http_ok "Nacos (宿主机端口)" "http://127.0.0.1:${NACOS_PORT:-8848}/nacos/v1/console/health/readiness" 30 || true
     fi
   fi
 

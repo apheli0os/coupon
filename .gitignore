@@ -33,6 +33,11 @@ docker/kafka/data/
 # 本地启停脚本运行时 PID 与日志
 .run/
 
+# 前端构建产物与依赖
+web/node_modules/
+web/dist/
+web/.vite/
+
 .DS_Store
 Thumbs.db
 *.swp

@@ -1,0 +1,79 @@
+# 告警规则：服务可用性 / 业务异常 / 中间件健康
+# 与 k8s/alerts.yml 同源，本地编排额外匹配 mall-gateway-health
+# HA 专属规则（Redis 主从切换 / MySQL 复制延迟 / Kafka ISR）需要有对应 exporter 指标才会触发
+groups:
+  - name: mall-service-availability
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"mall-services|mall-gateway-health"} == 0
+        for: 30s
+        labels: {severity: critical}
+        annotations:
+          summary: "服务 {{ $labels.app }} 实例下线"
+          description: "实例 {{ $labels.instance }} 超过 30 秒无法抓取指标"
+
+      - alert: HighErrorRate
+        expr: sum(rate(http_server_requests_seconds_count{status=~"5.."}[1m])) by (app) > 5
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.app }} 5xx 错误率过高"
+          description: "近 1 分钟 5xx 每秒超过 5 次"
+
+      - alert: HighLatencyP99
+        expr: histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket[1m])) by (le, app)) > 1
+        for: 3m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.app }} p99 延迟超过 1 秒"
+
+  - name: mall-business
+    rules:
+      - alert: SeckillSoldOutSpike
+        expr: rate(mall_seckill_soldout_total[1m]) > 100
+        for: 1m
+        labels: {severity: info}
+        annotations:
+          summary: "秒杀售罄请求激增"
+          description: "每秒超 100 次售罄拒绝，活动可能已结束或库存预热不足"
+
+      - alert: SeckillLatencyHigh
+        expr: histogram_quantile(0.99, rate(mall_seckill_latency_seconds_bucket[1m])) > 0.5
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "秒杀 p99 延迟超过 500ms"
+
+      - alert: CouponClaimStalled
+        expr: rate(mall_coupon_claim_success_total[5m]) == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "领券成功数 10 分钟为零"
+          description: "检查 Kafka 消费者是否积压、券模板是否都已发完"
+
+  - name: mall-middleware
+    rules:
+      - alert: RedisMasterSwitched
+        expr: redis_connected_slaves == 0
+        for: 2m
+        labels: {severity: info}
+        annotations:
+          summary: "Redis 无在线从节点"
+          description: "单机 demo 属正常；HA 环境表示可能已发生主从切换，确认应用已重连新主"
+
+      - alert: KafkaConsumerLagHigh
+        expr: sum by (consumergroup) (kafka_consumer_lag) > 10000
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "消费组 {{ $labels.consumergroup }} 积压超过 1 万条"
+          description: "检查订单落库/销量累加消费者是否卡住"
+
+      - alert: KafkaISRRetracted
+        expr: kafka_topic_partition_in_sync_replicas < 2
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Kafka 分区 ISR 不足 2"
+          description: "min.insync.replicas=2 不满足，acks=all 生产将失败（单机 demo 可忽略）"

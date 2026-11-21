@@ -69,8 +69,13 @@ management:
     web:
       exposure:
         # 严禁暴露 gateway 端点（GlobalFilter 不拦截 Actuator，暴露会允许无鉴权篡改路由）
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
+  endpoint:
+    prometheus:
+      enabled: true
   metrics:
     distribution:
       percentiles-histogram:
         http.server.requests: true
+    tags:
+      application: ${spring.application.name}

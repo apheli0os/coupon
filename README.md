@@ -24,7 +24,8 @@ Docker Compose 单机编排用于本地 demo，HA 验证用 `docker-compose-ha.y
 | 数据层 | MySQL 8、MyBatis-Plus、Flyway、ShardingSphere 5.4 | 持久化、数据库版本管理、2 库×4 表分片 |
 | 缓存/并发 | Redis 7、Redisson、Lua、Caffeine | 多级缓存、库存分桶预扣、分布式锁 |
 | 消息队列 | Kafka 3.7（KRaft） | 削峰、异步落库、Token 幂等、死信队列、定时关单 |
-| 可观测性 | Actuator + Prometheus + Grafana | 业务指标、health/liveness/readiness、Dashboard 与告警 |
+| 可观测性 | Actuator + Prometheus + Grafana + Alertmanager | 业务指标、health/liveness/readiness、Dashboard、告警分级路由 |
+| 前端 | Vue 3 + TypeScript + Vite + Element Plus | 运营管理台（券模板/领券/秒杀/订单/监控中心） |
 | 接口文档 | Springdoc OpenAPI 3 | Swagger UI |
 | 基础设施 | Docker Compose、Kubernetes | 本地 demo、HA 验证与生产编排 |
 
@@ -264,7 +265,9 @@ java -jar mall-order-service.jar --spring.profiles.active=sharding
 
 ### 6.2 可观测性
 
-各服务暴露 `/actuator/prometheus`，K8s 环境按 `k8s/prometheus-config.yaml` 配置 Pod 发现，告警规则见 `k8s/alerts.yml`（服务健康/业务异常/Kafka ISR 收缩/复制延迟），路由见 `k8s/alertmanager.yml`。Grafana Dashboard 在 `monitoring/grafana/`，含 10 个面板（QPS、P99、JVM、业务指标、Redis 从节点、Kafka ISR 等），provisioning 目录可自动加载。
+各服务（含网关）均暴露 `/actuator/prometheus`（网关依然关闭 `/actuator/gateway` 防无鉴权改路由）。**本地一键启动监控栈**：Windows 执行 `.\scripts\monitor.ps1 start`（Linux/macOS 执行 `./scripts/monitor.sh start` 或 `docker compose -f docker-compose-monitoring.yml up -d`），包含 Prometheus :9090、Alertmanager :9093、Grafana :3000（admin/admin）、Redis/Kafka exporter；Dashboard 12 个面板（服务健康/QPS/P99/5xx/JVM/GC/业务指标/Kafka 积压/ISR）通过 provisioning 自动加载。K8s 环境按 `k8s/prometheus-config.yaml` 配 Pod 发现，告警见 `k8s/alerts.yml`。详见 `docs/监控编排使用说明.md`。
+
+前端管理台在 `web/`（Vue 3 + Vite + Element Plus），`cd web && npm install && npm run dev` 后访问 :5173，提供券模板/领券/秒杀/订单/监控中心界面，详见 `web/README.md`。
 
 ## 7. 目录说明
 
@@ -277,17 +280,21 @@ config/checkstyle/          Checkstyle 规则
 sql/kafka-migration.sql     RocketMQ→Kafka 增量迁移（seckill_order.stock_bucket）
 docker-compose.yml          本地单机 demo 中间件（Kafka 单节点 KRaft）
 docker-compose-ha.yml       本地 HA 验证：MySQL 主从 + Redis 哨兵 + Kafka 3 broker
+docker-compose-monitoring.yml     可观测性栈：Prometheus/Alertmanager/Grafana/Redis+Kafka exporter
+web/                        Vue 3 管理台前端（npm run dev / build）
 docker-compose-nacos-cluster.yml   Nacos 3 节点集群（云环境用）
 docker-compose-redis-cluster.yml   Redis 3 主 3 从 Cluster（云环境用）
 build-images.sh / Dockerfile*     业务镜像构建（多阶段 + 复用 jar 两种）
 k8s/                        生产编排：Deployment/Service/HPA/Ingress/Prometheus/告警/deploy.sh
-monitoring/grafana/         Grafana Dashboard 与 provisioning 配置
+monitoring/                 Prometheus 配置/告警规则 + Alertmanager 路由 + Grafana Dashboard 与 provisioning
 perf/                       压测引擎、报告（24 份）与基准结果
 docs/API示例.md             完整 curl 示例与压测命令
 docs/HA部署与故障转移验证.md  HA 编排、故障转移实测、QPS 下降根因排查
 docs/云服务器部署方案.md      云服务器选型、部署、压测、成本
 docs/Kafka事务Exactly-Once说明.md  可选事务能力的使用与边界
 docs/工程化配置说明.md      Flyway / Lint / CI 的使用方式
+docs/监控编排使用说明.md    Prometheus/Grafana/Alertmanager 一键启动与抓取目标
+web/README.md              管理台前端启动、功能与部署说明
 ```
 
 ## 8. 环境要求

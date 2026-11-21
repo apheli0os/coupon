@@ -9,7 +9,7 @@ services:
   mysql-master:
     image: mysql:8.0
     container_name: mall-ha-mysql-master
-    restart: unless-stopped
+    restart: "no"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
       TZ: Asia/Shanghai
@@ -39,7 +39,7 @@ services:
   mysql-slave:
     image: mysql:8.0
     container_name: mall-ha-mysql-slave
-    restart: unless-stopped
+    restart: "no"
     depends_on:
       mysql-master:
         condition: service_healthy
@@ -73,7 +73,7 @@ services:
   redis-master:
     image: redis:7.2-alpine
     container_name: mall-ha-redis-master
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "16381:6379"
     volumes:
@@ -90,7 +90,7 @@ services:
   redis-slave:
     image: redis:7.2-alpine
     container_name: mall-ha-redis-slave
-    restart: unless-stopped
+    restart: "no"
     depends_on:
       redis-master:
         condition: service_healthy
@@ -111,7 +111,7 @@ services:
   sentinel-1:
     image: redis:7.2-alpine
     container_name: mall-ha-sentinel-1
-    restart: unless-stopped
+    restart: "no"
     depends_on:
       redis-master:
         condition: service_healthy
@@ -128,7 +128,7 @@ services:
   sentinel-2:
     image: redis:7.2-alpine
     container_name: mall-ha-sentinel-2
-    restart: unless-stopped
+    restart: "no"
     depends_on:
       redis-master:
         condition: service_healthy
@@ -145,7 +145,7 @@ services:
   sentinel-3:
     image: redis:7.2-alpine
     container_name: mall-ha-sentinel-3
-    restart: unless-stopped
+    restart: "no"
     depends_on:
       redis-master:
         condition: service_healthy
@@ -163,7 +163,7 @@ services:
   kafka-1:
     image: apache/kafka:3.7.2
     container_name: mall-ha-kafka-1
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "19092:9092"
     environment:
@@ -193,7 +193,7 @@ services:
   kafka-2:
     image: apache/kafka:3.7.2
     container_name: mall-ha-kafka-2
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "19093:9092"
     environment:
@@ -223,7 +223,7 @@ services:
   kafka-3:
     image: apache/kafka:3.7.2
     container_name: mall-ha-kafka-3
-    restart: unless-stopped
+    restart: "no"
     ports:
       - "19094:9092"
     environment:

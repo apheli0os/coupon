@@ -59,6 +59,23 @@ function Test-Command([string]$Cmd) {
     return $null -ne (Get-Command $Cmd -ErrorAction SilentlyContinue)
 }
 
+function Resolve-JavaExe {
+    if ($env:JAVA_HOME) {
+        $candidate = Join-Path $env:JAVA_HOME "bin\java.exe"
+        if (Test-Path $candidate) { return $candidate }
+    }
+    try {
+        $out = (& java -XshowSettings:properties -version 2>&1 | Out-String)
+        if ($out -match 'java\.home\s*=\s*([^\r\n]+)') {
+            $candidate = Join-Path $Matches[1].Trim() "bin\java.exe"
+            if (Test-Path $candidate) { return $candidate }
+        }
+    } catch {
+        # 回退到 PATH
+    }
+    return "java"
+}
+
 function Test-TcpPort([string]$TargetHost, [int]$Port) {
     $client = New-Object System.Net.Sockets.TcpClient
     try {
@@ -89,13 +106,172 @@ function Wait-TcpPort([string]$Label, [int]$Port, [int]$TimeoutSec = 90) {
     return $false
 }
 
+function Wait-ContainerHealthy([string]$Label, [string]$ContainerName, [int]$FallbackPort, [int]$TimeoutSec = 120) {
+    Write-Info "等待 $Label ($ContainerName) 健康检查就绪..."
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        $status = (& docker inspect --format "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" $ContainerName 2>$null)
+        if ($status) { $status = $status.Trim() }
+        if ($status -eq "healthy") {
+            Write-Ok "$Label ($ContainerName) healthy"
+            return $true
+        }
+        if ($status -eq "exited" -or $status -eq "dead") {
+            Write-Err "$Label ($ContainerName) 容器异常退出 ($status)"
+            return $false
+        }
+        Start-Sleep -Seconds 2
+    }
+    Write-Warn "$Label ($ContainerName) 在 ${TimeoutSec}s 内未达到 healthy，回退检测端口 :$FallbackPort"
+    return (Test-TcpPort "127.0.0.1" $FallbackPort)
+}
+
+function Get-DirectHttpBody([string]$Url, [int]$TimeoutMs = 3000) {
+    $req = [System.Net.HttpWebRequest]::Create($Url)
+    $req.Method = "GET"
+    $req.Proxy = $null
+    $req.Timeout = $TimeoutMs
+    $req.ReadWriteTimeout = $TimeoutMs
+    $resp = $req.GetResponse()
+    try {
+        $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
+        try {
+            return @{ StatusCode = [int]$resp.StatusCode; Body = $reader.ReadToEnd() }
+        } finally {
+            $reader.Dispose()
+        }
+    } finally {
+        $resp.Dispose()
+    }
+}
+
+function Wait-HttpOk([string]$Label, [string]$Url, [int]$TimeoutSec = 120) {
+    Write-Info "等待 $Label ($Url) 就绪..."
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $res = Get-DirectHttpBody $Url 3000
+            if ($res.StatusCode -ge 200 -and $res.StatusCode -lt 300) {
+                Write-Ok "$Label 已就绪"
+                return $true
+            }
+        } catch {
+            # 尚未就绪，继续轮询
+        }
+        Start-Sleep -Seconds 2
+    }
+    Write-Warn "$Label ($Url) 在 ${TimeoutSec}s 内未就绪，继续尝试后续步骤"
+    return $false
+}
+
 function Test-Health([int]$Port) {
     try {
-        $resp = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/actuator/health" -TimeoutSec 2 -ErrorAction Stop
-        return ($resp.status -eq "UP")
+        $res = Get-DirectHttpBody "http://127.0.0.1:$Port/actuator/health" 2500
+        return ($res.Body -match '"status"\s*:\s*"UP"')
     } catch {
         return $false
     }
+}
+
+function Get-ContainerHostPort([string]$ContainerName, [int]$ContainerPort) {
+    $running = (& docker inspect -f "{{.State.Running}}" $ContainerName 2>$null)
+    if ($running -and $running.Trim() -eq "true") {
+        $mapped = (& docker port $ContainerName "$ContainerPort/tcp" 2>$null | Select-Object -First 1)
+        if ($mapped -and $mapped -match ":(\d+)\s*$") {
+            return [int]$Matches[1]
+        }
+    }
+    return $null
+}
+
+function Find-FreePort([int[]]$Candidates) {
+    foreach ($p in $Candidates) {
+        if (-not (Test-TcpPort "127.0.0.1" $p)) { return $p }
+    }
+    throw "未找到可用端口: $($Candidates -join ', ')"
+}
+
+function Load-PortsEnv {
+    $portsFile = Join-Path $RunDir "ports.env"
+    if (-not (Test-Path $portsFile)) { return }
+    foreach ($line in (Get-Content $portsFile -ErrorAction SilentlyContinue)) {
+        if ($line -match '^(MYSQL_PORT|REDIS_PORT|NACOS_PORT|NACOS_GRPC_PORT|NACOS_RAFT_PORT|NACOS_ADDR)=(.+)$') {
+            $name = $Matches[1]
+            $val = $Matches[2].Trim()
+            if (-not [Environment]::GetEnvironmentVariable($name, "Process")) {
+                [Environment]::SetEnvironmentVariable($name, $val, "Process")
+            }
+        }
+    }
+}
+
+function Save-PortsEnv {
+    Ensure-Dirs
+    $portsFile = Join-Path $RunDir "ports.env"
+    Set-Content -Path $portsFile -Value @(
+        "MYSQL_PORT=$($env:MYSQL_PORT)"
+        "REDIS_PORT=$($env:REDIS_PORT)"
+        "NACOS_PORT=$($env:NACOS_PORT)"
+        "NACOS_GRPC_PORT=$($env:NACOS_GRPC_PORT)"
+        "NACOS_RAFT_PORT=$($env:NACOS_RAFT_PORT)"
+        "NACOS_ADDR=$($env:NACOS_ADDR)"
+    ) -Encoding ASCII
+}
+
+function Set-NacosPortEnv([int]$MainPort) {
+    $env:NACOS_PORT = "$MainPort"
+    $env:NACOS_GRPC_PORT = "$($MainPort + 1000)"
+    $env:NACOS_RAFT_PORT = "$($MainPort + 1001)"
+    $env:NACOS_ADDR = "127.0.0.1:$MainPort"
+}
+
+function Resolve-DevPorts {
+    if ($Profile -ne "dev") { return }
+    if ($SkipDocker) { Load-PortsEnv }
+
+    if (-not $env:MYSQL_PORT) {
+        $existing = if (Test-Command "docker") { Get-ContainerHostPort "mall-mysql" 3306 } else { $null }
+        if ($existing) {
+            $env:MYSQL_PORT = "$existing"
+        } elseif (-not $SkipDocker -and (Test-TcpPort "127.0.0.1" 3306)) {
+            $alt = Find-FreePort @(13306, 13316, 23306)
+            $env:MYSQL_PORT = "$alt"
+            Write-Warn "检测到本机 :3306 已被占用，自动将 Docker MySQL 端口切换为 127.0.0.1:$alt"
+        } else {
+            $env:MYSQL_PORT = "3306"
+        }
+    }
+
+    if (-not $env:REDIS_PORT) {
+        $existing = if (Test-Command "docker") { Get-ContainerHostPort "mall-redis" 6379 } else { $null }
+        if ($existing) {
+            $env:REDIS_PORT = "$existing"
+        } elseif (-not $SkipDocker -and (Test-TcpPort "127.0.0.1" 6379)) {
+            $alt = Find-FreePort @(16379, 16380, 26379)
+            $env:REDIS_PORT = "$alt"
+            Write-Warn "检测到本机 :6379 已被占用，自动将 Docker Redis 端口切换为 127.0.0.1:$alt"
+        } else {
+            $env:REDIS_PORT = "6379"
+        }
+    }
+
+    if (-not $env:NACOS_PORT) {
+        $existingHttp = if (Test-Command "docker") { Get-ContainerHostPort "mall-nacos" 8848 } else { $null }
+        $existingGrpc = if (Test-Command "docker") { Get-ContainerHostPort "mall-nacos" 9848 } else { $null }
+        if ($existingHttp -and $existingGrpc) {
+            Set-NacosPortEnv $existingHttp
+        } elseif (-not $SkipDocker -and ((Test-TcpPort "127.0.0.1" 8848) -or (Test-TcpPort "127.0.0.1" 9848))) {
+            $alt = Find-FreePort @(18848, 28848)
+            Set-NacosPortEnv $alt
+            Write-Warn "检测到本机 :8848/:9848 已被占用，自动将 Docker Nacos 端口切换为 127.0.0.1:$alt (gRPC :$($alt + 1000))"
+        } else {
+            Set-NacosPortEnv 8848
+        }
+    } else {
+        Set-NacosPortEnv ([int]$env:NACOS_PORT)
+    }
+
+    Save-PortsEnv
 }
 
 function Wait-ServiceHealth($Svc, [int]$TimeoutSec = 90) {
@@ -139,6 +315,7 @@ function Start-Middleware {
     if (-not (Test-Command "docker")) {
         throw "未找到 docker 命令，请先安装并启动 Docker Desktop（或加 -SkipDocker 跳过中间件）"
     }
+    Resolve-DevPorts
     Write-Info "启动 Docker 中间件 ($ComposeFile)..."
     Push-Location $RootDir
     try {
@@ -153,10 +330,30 @@ function Start-Middleware {
         Wait-TcpPort "Redis Sentinel (HA)" 26381 60 | Out-Null
         Wait-TcpPort "Kafka Broker-1 (HA)" 19092 90 | Out-Null
     } else {
-        Wait-TcpPort "MySQL" 3306 120 | Out-Null
-        Wait-TcpPort "Redis" 6379 60 | Out-Null
-        Wait-TcpPort "Kafka" 9092 90 | Out-Null
-        Wait-TcpPort "Nacos" 8848 90 | Out-Null
+        # 若 Docker Desktop WSL2 暴露默认 8848/9848 发生端口绑定冲突，自动切到 18848/19848/19849 并重建 Nacos 容器
+        $boundNacosHttp = Get-ContainerHostPort "mall-nacos" 8848
+        $boundNacosGrpc = Get-ContainerHostPort "mall-nacos" 9848
+        if ((-not $boundNacosHttp -or -not $boundNacosGrpc) -and $env:NACOS_PORT -eq "8848") {
+            $altNacos = Find-FreePort @(18848, 28848)
+            Set-NacosPortEnv $altNacos
+            Save-PortsEnv
+            Write-Warn "Nacos 默认端口 :8848/:9848 未能在宿主机成功映射，自动切换为 127.0.0.1:$altNacos (gRPC :$($altNacos + 1000))..."
+            Push-Location $RootDir
+            try {
+                & docker compose -f $ComposeFile up -d nacos
+                if ($LASTEXITCODE -ne 0) { throw "Nacos 端口切换重建失败" }
+            } finally {
+                Pop-Location
+            }
+        }
+        $mysqlPort = if ($env:MYSQL_PORT) { [int]$env:MYSQL_PORT } else { 3306 }
+        $redisPort = if ($env:REDIS_PORT) { [int]$env:REDIS_PORT } else { 6379 }
+        $nacosPort = if ($env:NACOS_PORT) { [int]$env:NACOS_PORT } else { 8848 }
+        Wait-ContainerHealthy "MySQL" "mall-mysql" $mysqlPort 120 | Out-Null
+        Wait-ContainerHealthy "Redis" "mall-redis" $redisPort 60 | Out-Null
+        Wait-ContainerHealthy "Kafka" "mall-kafka" 9092 120 | Out-Null
+        Wait-ContainerHealthy "Nacos" "mall-nacos" $nacosPort 120 | Out-Null
+        Wait-HttpOk "Nacos (宿主机端口)" "http://127.0.0.1:$nacosPort/nacos/v1/console/health/readiness" 30 | Out-Null
     }
 }
 
@@ -165,6 +362,7 @@ function Stop-Middleware {
         Write-Warn "未找到 docker 命令，跳过停止中间件"
         return
     }
+    Load-PortsEnv
     Push-Location $RootDir
     try {
         if ($Clean) {
@@ -207,8 +405,9 @@ function Build-IfNeeded {
 function Start-All {
     if (-not (Test-Command "java")) { throw "未找到 java 命令，请确认 JDK 17+ 已加入 PATH" }
     Ensure-Dirs
-    if (-not $SkipDocker) { Start-Middleware }
+    if ($SkipDocker) { Resolve-DevPorts } else { Start-Middleware }
     Build-IfNeeded
+    $javaExe = Resolve-JavaExe
 
     foreach ($svc in $Services) {
         $existingPid = Get-RunningJavaPid $svc
@@ -221,13 +420,13 @@ function Start-All {
         $errLog = Join-Path $LogDir "$($svc.Name).err.log"
         $pidFile = Join-Path $RunDir "$($svc.Name).pid"
 
-        $javaArgs = @("-Xms128m", "-Xmx384m", "-jar", $jar)
+        $javaArgs = @("-Xms64m", "-Xmx320m", "-jar", $jar)
         if ($svc.UseProfile) {
             $javaArgs += "--spring.profiles.active=$Profile"
         }
 
         Write-Info "启动 $($svc.Module) (:$($svc.Port), profile=$Profile)..."
-        $proc = Start-Process -FilePath "java" -ArgumentList $javaArgs `
+        $proc = Start-Process -FilePath $javaExe -ArgumentList $javaArgs `
             -WorkingDirectory $RootDir `
             -RedirectStandardOutput $outLog `
             -RedirectStandardError $errLog `
@@ -252,7 +451,8 @@ function Start-All {
     Write-Host "  Swagger 优惠券  : http://localhost:8081/swagger-ui.html"
     Write-Host "  Swagger 秒杀    : http://localhost:8082/swagger-ui.html"
     Write-Host "  Swagger 订单    : http://localhost:8083/swagger-ui.html"
-    Write-Host "  Nacos 控制台    : http://localhost:8848/nacos  (nacos / nacos)"
+    $shownNacosPort = if ($env:NACOS_PORT) { $env:NACOS_PORT } else { "8848" }
+    Write-Host "  Nacos 控制台    : http://localhost:$shownNacosPort/nacos  (nacos / nacos)"
     Write-Host "  Sentinel 控制台 : http://localhost:8090"
     Write-Host "  日志目录        : $LogDir"
 }
@@ -267,7 +467,12 @@ function Stop-All {
         $procId = Get-RunningJavaPid $svc
         if ($procId) {
             Write-Info "停止 $($svc.Module) (PID=$procId)..."
+            $children = Get-CimInstance Win32_Process -Filter "ParentProcessId=$procId" -ErrorAction SilentlyContinue
+            foreach ($child in $children) {
+                Stop-Process -Id $child.ProcessId -Force -ErrorAction SilentlyContinue
+            }
             Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $procId -Timeout 5 -ErrorAction SilentlyContinue
             Write-Ok "$($svc.Module) 已停止"
         } else {
             Write-Host "[ -- ] $($svc.Module) 未运行"

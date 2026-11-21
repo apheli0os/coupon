@@ -1,21 +1,29 @@
 # 本地开发依赖：MySQL / Redis / Kafka / Nacos / Sentinel
-# 启动：docker compose up -d
+# 启动：docker compose up -d（或 .\scripts\mall.ps1 start）
 # 停止：docker compose down（加 -v 会清空数据）
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
 
 services:
   mysql:
     image: mysql:8.0
     container_name: mall-mysql
-    restart: unless-stopped
+    restart: "no"
+    mem_limit: 640m
+    logging: *default-logging
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
       TZ: Asia/Shanghai
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT:-3306}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
       - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-time-zone=+08:00
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-time-zone=+08:00 --innodb-buffer-pool-size=256M
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -p\"$$MYSQL_ROOT_PASSWORD\""]
       interval: 10s
@@ -25,14 +33,16 @@ services:
   redis:
     image: redis:7.2-alpine
     container_name: mall-redis
-    restart: unless-stopped
+    restart: "no"
+    mem_limit: 320m
+    logging: *default-logging
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     # 库存/防重实例必须用 noeviction，防止内存紧张时误淘汰库存或已购用户 Set 引发超卖；
     # 所有活动 key 均已配置活动结束后 7 天自动过期 TTL
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -41,26 +51,31 @@ services:
 
   # Kafka 单节点 KRaft（无 ZooKeeper）。生产请改用 ≥3 broker + 3 controller，
   # 并设 default.replication.factor=3 / min.insync.replicas=2。
+  # 使用 Docker named volume（kafka-data）替代宿主机 bind-mount，避免 Windows/WSL2 跨 9P 高磁盘 IO。
   kafka:
     image: apache/kafka:3.7.2
     container_name: mall-kafka
-    restart: unless-stopped
+    restart: "no"
+    mem_limit: 640m
+    logging: *default-logging
     ports:
       - "9092:9092"
+      - "9095:9095"
     environment:
       KAFKA_NODE_ID: 0
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_CONTROLLER_QUORUM_VOTERS: 0@localhost:9093
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://:9092,HOST_DOCKER://:9095,INTERNAL://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,HOST_DOCKER://host.docker.internal:9095,INTERNAL://mall-kafka:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,HOST_DOCKER:PLAINTEXT,INTERNAL:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_HEAP_OPTS: "-Xms192m -Xmx384m"
     volumes:
-      - ./docker/kafka/data:/var/lib/kafka/data
+      - kafka-data:/var/lib/kafka/data
     healthcheck:
       test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
       interval: 10s
@@ -70,26 +85,40 @@ services:
   nacos:
     image: nacos/nacos-server:v2.3.2
     container_name: mall-nacos
-    restart: unless-stopped
+    restart: "no"
+    mem_limit: 896m
+    logging: *default-logging
     environment:
       MODE: standalone
       PREFER_HOST_MODE: hostname
       JVM_XMS: 256m
       JVM_XMX: 512m
+      JVM_XMN: 256m
+      JVM_MS: 64m
+      JVM_MMS: 192m
     ports:
-      - "8848:8848"
-      - "9848:9848"
-      - "9849:9849"
+      - "${NACOS_PORT:-8848}:8848"
+      - "${NACOS_GRPC_PORT:-9848}:9848"
+      - "${NACOS_RAFT_PORT:-9849}:9849"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8848/nacos/v1/console/health/readiness || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
 
   sentinel:
     image: bladex/sentinel-dashboard:1.8.6
     container_name: mall-sentinel
-    restart: unless-stopped
+    restart: "no"
+    mem_limit: 384m
+    logging: *default-logging
     ports:
       - "8090:8080"
     environment:
       AUTH_ENABLED: "false"
+      JAVA_OPTS: "-Xms64m -Xmx192m"
 
 volumes:
   mysql-data:
   redis-data:
+  kafka-data:

@@ -1,0 +1,130 @@
+# 可观测性编排：Prometheus + Alertmanager + Grafana + Redis/Kafka exporter
+# 启动：.\scripts\monitor.ps1 start（Windows）或 ./scripts/monitor.sh start（Linux/macOS）
+# 访问：Grafana http://localhost:3000 (admin/admin) / Prometheus :9090 / Alertmanager :9093
+#
+# 说明：
+#   - 业务服务默认跑在宿主机（scripts/mall.ps1 / mall.sh 启动），容器内通过 host.docker.internal 访问；
+#   - 所有容器均设 mem_limit 与日志轮转上限，Prometheus 限制保留 3d / 512MB，避免占用过多 WSL2 内存与磁盘。
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: mall-prometheus
+    restart: "no"
+    mem_limit: 384m
+    logging: *default-logging
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=3d'
+      - '--storage.tsdb.retention.size=512MB'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    ports:
+      - '9090:9090'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    networks: [mall-monitor]
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:9090/-/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: mall-alertmanager
+    restart: "no"
+    mem_limit: 128m
+    logging: *default-logging
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - '9093:9093'
+    networks: [mall-monitor]
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:9093/-/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: mall-grafana
+    restart: "no"
+    mem_limit: 320m
+    logging: *default-logging
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_SERVER_ROOT_URL: 'http://localhost:3000'
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - '3000:3000'
+    networks: [mall-monitor]
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/api/health || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # Redis exporter：连宿主机 Redis（HA 环境通过 REDIS_EXPORTER_ADDR 覆盖）
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.61.0
+    container_name: mall-redis-exporter
+    restart: "no"
+    mem_limit: 96m
+    logging: *default-logging
+    environment:
+      REDIS_ADDR: ${REDIS_EXPORTER_ADDR:-host.docker.internal:6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    ports:
+      - '9121:9121'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    networks: [mall-monitor]
+
+  # Kafka exporter：连 docker-compose.yml 的 HOST_DOCKER 监听器 (host.docker.internal:9095)，
+  # 避免连 9092 时 Broker 返回 advertised localhost:9092 导致容器内无法回连。
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: mall-kafka-exporter
+    restart: "no"
+    mem_limit: 96m
+    logging: *default-logging
+    command:
+      - '--kafka.server=${KAFKA_EXPORTER_ADDR:-host.docker.internal:9095}'
+      - '--log.level=warn'
+    ports:
+      - '9308:9308'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    networks: [mall-monitor]
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
+
+networks:
+  mall-monitor:
+    driver: bridge

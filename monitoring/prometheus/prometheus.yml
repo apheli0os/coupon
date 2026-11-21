@@ -1,0 +1,67 @@
+# Prometheus 主配置（本地监控栈）
+# 抓取：Spring Boot Actuator + Redis/Kafka exporter + Prometheus 自身
+# K8s 环境改用 k8s/prometheus-config.yaml 的服务发现片段
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: mall-local
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Spring Boot 服务（宿主机运行，通过 host.docker.internal 从容器访问）
+  # compose 中已加 extra_hosts: host.docker.internal:host-gateway
+  - job_name: mall-services
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - 'host.docker.internal:8081'   # coupon-service
+          - 'host.docker.internal:8082'   # seckill-service
+          - 'host.docker.internal:8083'   # order-service
+        labels:
+          cluster: mall-local
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: 'host.docker.internal:(.*)'
+        target_label: port
+        replacement: '$1'
+      - source_labels: [__address__]
+        regex: 'host.docker.internal:8081'
+        target_label: app
+        replacement: 'mall-coupon-service'
+      - source_labels: [__address__]
+        regex: 'host.docker.internal:8082'
+        target_label: app
+        replacement: 'mall-seckill-service'
+      - source_labels: [__address__]
+        regex: 'host.docker.internal:8083'
+        target_label: app
+        replacement: 'mall-order-service'
+
+  # 网关暴露 /actuator/prometheus（依然关闭 /actuator/gateway 防无鉴权改路由）
+  - job_name: mall-gateway-health
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+        labels: { app: mall-gateway }
+
+  # 中间件 exporter（放在监控 compose 网络内，用服务名访问）
+  - job_name: redis
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels: { app: redis }
+  - job_name: kafka
+    static_configs:
+      - targets: ['kafka-exporter:9308']
+        labels: { app: kafka }
