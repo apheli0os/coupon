@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
+import org.redisson.spring.starter.RedissonAutoConfigurationCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -50,5 +51,26 @@ public class RedisConfig {
         template.setHashValueSerializer(jsonSerializer);
         template.afterPropertiesSet();
         return template;
+    }
+
+    /**
+     * 当未配置 REDIS_PASSWORD 时，Spring 会把 `${REDIS_PASSWORD:}` 解析为空字符串 ""，
+     * Redisson 3.34 会向无密码 Redis 发送 `AUTH ""` 触发启动失败；此处统一将空白密码归一化为 null。
+     */
+    @Bean
+    public RedissonAutoConfigurationCustomizer redissonEmptyPasswordSanitizer() {
+        return config -> {
+            if (config.isSingleConfig() && isBlank(config.useSingleServer().getPassword())) {
+                config.useSingleServer().setPassword(null);
+            } else if (config.isSentinelConfig() && isBlank(config.useSentinelServers().getPassword())) {
+                config.useSentinelServers().setPassword(null);
+            } else if (config.isClusterConfig() && isBlank(config.useClusterServers().getPassword())) {
+                config.useClusterServers().setPassword(null);
+            }
+        };
+    }
+
+    private static boolean isBlank(String value) {
+        return value != null && value.isBlank();
     }
 }

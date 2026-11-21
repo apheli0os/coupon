@@ -1,0 +1,47 @@
+:root {
+  --mall-primary: #6d5efc;
+  --mall-bg: #f5f7fa;
+  --mall-card: #ffffff;
+  --mall-text: #1f2937;
+  --mall-muted: #6b7280;
+}
+
+* { box-sizing: border-box; }
+html, body, #app { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  background: var(--mall-bg);
+  color: var(--mall-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+.page { padding: 20px; }
+.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.page-title { font-size: 20px; font-weight: 700; margin: 0; }
+.page-subtitle { color: var(--mall-muted); font-size: 13px; margin-top: 4px; }
+
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin-bottom: 20px; }
+.stat-card {
+  background: var(--mall-card);
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  border: 1px solid #eef0f4;
+}
+.stat-card .label { font-size: 13px; color: var(--mall-muted); }
+.stat-card .value { font-size: 28px; font-weight: 700; margin-top: 8px; line-height: 1.2; }
+.stat-card .hint { font-size: 12px; color: var(--mall-muted); margin-top: 6px; }
+.stat-card.primary .value { color: var(--mall-primary); }
+.stat-card.success .value { color: #16a34a; }
+.stat-card.warning .value { color: #d97706; }
+
+.card { background: var(--mall-card); border-radius: 12px; padding: 20px; border: 1px solid #eef0f4; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+.mt-16 { margin-top: 16px; }
+.text-muted { color: var(--mall-muted); }
+.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+.login-card { width: 420px; background: #fff; border-radius: 16px; padding: 36px; box-shadow: 0 20px 60px rgba(0,0,0,.2); }
+.login-card h1 { margin: 0 0 6px; font-size: 24px; }
+.login-card .sub { color: var(--mall-muted); font-size: 13px; margin-bottom: 24px; }
