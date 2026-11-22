@@ -16,7 +16,7 @@ import java.util.Date;
  * JWT 工具。生产环境密钥应从配置中心/KMS 注入，且长度不少于 32 字节。
  */
 @Component
-public class JwtUtil {
+public final class JwtUtil {
 
     public static final String HEADER = "Authorization";
     public static final String PREFIX = "Bearer ";

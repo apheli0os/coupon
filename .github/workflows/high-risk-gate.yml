@@ -1,0 +1,63 @@
+name: High-Risk Gate
+
+on:
+  pull_request:
+    branches: [main, master, develop]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  high-risk-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check high-risk file modifications
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          git fetch origin "${BASE_REF}" --depth=0 || true
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          base_ref = os.environ["BASE_REF"]
+          labels = set(json.loads(os.environ.get("PR_LABELS", "[]")))
+          patterns = [
+              re.compile(r"^sql/"),
+              re.compile(r"db/migration/"),
+              re.compile(r"^\.github/"),
+              re.compile(r"^AGENTS\.md$"),
+              re.compile(r"^config/checkstyle/"),
+              re.compile(r"^config/spotbugs/"),
+          ]
+
+          out = subprocess.check_output(
+              ["git", "diff", "--name-only", f"origin/{base_ref}...HEAD"],
+              text=True,
+          )
+          matched = [f for f in out.splitlines() if any(p.search(f) for p in patterns)]
+          if not matched:
+              print("No high-risk files changed.")
+              sys.exit(0)
+
+          print("High-risk files modified:")
+          for f in matched:
+              print(f"  - {f}")
+
+          if "approved-high-risk" in labels:
+              print("Label 'approved-high-risk' present. Gate passed.")
+              sys.exit(0)
+
+          print("BLOCKED: Add label 'approved-high-risk' to this PR after reviewing the high-risk changes.", file=sys.stderr)
+          sys.exit(1)
+          PY

@@ -26,7 +26,7 @@ import java.util.zip.CRC32;
  */
 @Slf4j
 @Component
-public class IdGenerator {
+public final class IdGenerator {
 
     private static final int MAX_SLOT = 1024;
     private static final int BIT_RANGE = 32;

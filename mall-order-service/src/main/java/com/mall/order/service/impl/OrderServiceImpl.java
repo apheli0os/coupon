@@ -68,10 +68,10 @@ public class OrderServiceImpl implements OrderService {
         order.setActivityId(message.getActivityId());
         order.setProductName(message.getProductName());
         order.setSeckillPrice(message.getSeckillPrice());
-        order.setQuantity(message.getQuantity() == null ? 1 : message.getQuantity());
+        order.setQuantity(message.getQuantity() == null ? Integer.valueOf(1) : message.getQuantity());
         BigDecimal price = message.getSeckillPrice() == null ? BigDecimal.ZERO : message.getSeckillPrice();
         order.setTotalAmount(price.multiply(BigDecimal.valueOf(order.getQuantity())));
-        order.setStockBucket(message.getStockBucket() == null ? 0 : message.getStockBucket());
+        order.setStockBucket(message.getStockBucket() == null ? Integer.valueOf(0) : message.getStockBucket());
         order.setStatus(0);
         order.setStockRestored(0);
         order.setCreateTime(message.getCreateTime() == null ? LocalDateTime.now() : message.getCreateTime());
@@ -219,7 +219,7 @@ public class OrderServiceImpl implements OrderService {
             event.setOrderId(order.getOrderId());
             event.setUserId(order.getUserId());
             event.setActivityId(order.getActivityId());
-            event.setQuantity(order.getQuantity() == null ? 1 : order.getQuantity());
+            event.setQuantity(order.getQuantity() == null ? Integer.valueOf(1) : order.getQuantity());
             event.setStockBucket(order.getStockBucket());
             event.setCreateTime(LocalDateTime.now());
             kafkaTemplate.send(CommonConstant.MQ_TOPIC_SECKILL_CANCEL, order.getOrderId(), event);
@@ -271,7 +271,7 @@ public class OrderServiceImpl implements OrderService {
             event.setOrderId(order.getOrderId());
             event.setUserId(order.getUserId());
             event.setActivityId(order.getActivityId());
-            event.setQuantity(order.getQuantity() == null ? 1 : order.getQuantity());
+            event.setQuantity(order.getQuantity() == null ? Integer.valueOf(1) : order.getQuantity());
             event.setStockBucket(order.getStockBucket());
             event.setCreateTime(order.getCreateTime() == null ? LocalDateTime.now() : order.getCreateTime());
             kafkaTemplate.send(CommonConstant.MQ_TOPIC_SECKILL_ORDER_CREATED, order.getOrderId(), event);

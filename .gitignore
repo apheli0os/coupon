@@ -41,4 +41,6 @@ web/.vite/
 .DS_Store
 Thumbs.db
 *.swp
+.cache/
+formal/**/states/
 

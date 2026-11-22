@@ -25,7 +25,7 @@ import java.util.List;
  * 2) 网关校验 JWT 后使用 headers.set 覆盖写入 X-User-Id / X-User-Role，防止客户端伪造请求头越权或绕过限流。
  */
 @Component
-public class AuthGlobalFilter implements GlobalFilter, Ordered {
+public final class AuthGlobalFilter implements GlobalFilter, Ordered {
 
     private static final String USER_ID_HEADER = "X-User-Id";
     private static final String USER_ROLE_HEADER = "X-User-Role";

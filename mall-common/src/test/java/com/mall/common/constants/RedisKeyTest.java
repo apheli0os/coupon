@@ -2,6 +2,8 @@ package com.mall.common.constants;
 
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -55,6 +57,35 @@ class RedisKeyTest {
                 "seckill.lua", "seckill_rollback.lua", "seckill_expire_compensate.lua",
                 "seckill_cancel_rollback.lua", "seckill_sold_state.lua", "token_claim.lua"}) {
             assertNotNull(getClass().getClassLoader().getResource("lua/" + name), "缺少 Lua 脚本: " + name);
+        }
+    }
+
+    @Test
+    void businessRedisKeys_mustContainClusterHashTag() throws Exception {
+        for (Method method : RedisKey.class.getDeclaredMethods()) {
+            if (!Modifier.isStatic(method.getModifiers())
+                    || !Modifier.isPublic(method.getModifiers())
+                    || !String.class.equals(method.getReturnType())) {
+                continue;
+            }
+            String name = method.getName();
+            if ((!name.startsWith("coupon") && !name.startsWith("seckill")) || name.endsWith("Lock")) {
+                continue;
+            }
+            Class<?>[] paramTypes = method.getParameterTypes();
+            Object[] args = new Object[paramTypes.length];
+            for (int i = 0; i < paramTypes.length; i++) {
+                if (Long.class.equals(paramTypes[i]) || long.class.equals(paramTypes[i])) {
+                    args[i] = 1L;
+                } else if (int.class.equals(paramTypes[i]) || Integer.class.equals(paramTypes[i])) {
+                    args[i] = 0;
+                } else if (String.class.equals(paramTypes[i])) {
+                    args[i] = "1";
+                }
+            }
+            String key = (String) method.invoke(null, args);
+            assertTrue(key.contains("{") && key.contains("}"),
+                    "RedisKey." + name + " must include cluster hash tag {id}, got: " + key);
         }
     }
 }
