@@ -39,6 +39,10 @@ public final class RedisKey {
         return "coupon:{" + templateId + "}:token:" + userCouponId;
     }
 
+    public static String couponRollbackGuard(Long templateId, Long userCouponId) {
+        return "coupon:{" + templateId + "}:rollback:" + userCouponId;
+    }
+
     /* ===== 秒杀 ===== */
 
     /**
@@ -78,14 +82,17 @@ public final class RedisKey {
         return "seckill:{" + activityId + "}:activity";
     }
 
-    /** 秒杀下单幂等与防超卖凭证 String */
-    public static String seckillOrderToken(Long activityId, Long userId) {
-        return "seckill:{" + activityId + "}:token:" + userId;
+    public static String seckillOrderToken(Long activityId, String orderId) {
+        return "seckill:{" + activityId + "}:token:" + orderId;
     }
 
     /** 关单归还库存幂等键（按 orderId 防止宕机重试时误撤用户重新下单的新订单） */
     public static String seckillOrderRollbackGuard(Long activityId, String orderId) {
         return "seckill:{" + activityId + "}:rollback:" + orderId;
+    }
+
+    public static String seckillSoldState(Long activityId, String orderId) {
+        return "seckill:{" + activityId + "}:soldstate:" + orderId;
     }
 
     /** 秒杀销量累加去重键 */
@@ -108,12 +115,20 @@ public final class RedisKey {
         return "lock:seckill:activity:" + activityId;
     }
 
+    public static String seckillSoldLock(Long activityId) {
+        return "lock:seckill:sold:" + activityId;
+    }
+
     public static String couponExpireJobLock() {
         return "lock:job:coupon:expire";
     }
 
     public static String couponActivateJobLock() {
         return "lock:job:coupon:activate";
+    }
+
+    public static String couponReconcileJobLock() {
+        return "lock:job:coupon:reconcile";
     }
 
     public static String seckillActivateJobLock() {

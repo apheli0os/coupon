@@ -2,6 +2,7 @@ package com.mall.coupon.service.impl;
 
 import com.mall.common.R;
 import com.mall.common.ResultCode;
+import com.mall.common.constants.RedisKey;
 import com.mall.common.context.UserContext;
 import com.mall.common.exception.BizException;
 import com.mall.common.message.OrderQueryResult;
@@ -143,13 +144,50 @@ class CouponServiceImplTest {
         when(idGenerator.nextId()).thenReturn(8888L);
         when(kafkaTemplate.send(anyString(), anyString(), any()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("broker down")));
-        when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_COUPON_ROLLBACK), anyList(), any(), any()))
+        when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_COUPON_ROLLBACK), anyList(),
+                eq("1001"), eq("8888"), eq(RedisKey.ROLLBACK_GUARD_TTL_SECONDS)))
                 .thenReturn(List.of(0L, 100L));
         when(luaExecutor.parse(List.of(0L, 100L))).thenReturn(new long[]{0L, 100L});
 
         BizException ex = assertThrows(BizException.class, () -> couponService.claim(100L));
         assertEquals(ResultCode.MQ_SEND_FAILED.getCode(), ex.getCode());
-        verify(luaExecutor).execute(eq(LuaScriptExecutor.SCRIPT_COUPON_ROLLBACK), anyList(), eq("1001"), eq("8888"));
+        verify(luaExecutor).execute(eq(LuaScriptExecutor.SCRIPT_COUPON_ROLLBACK),
+                eq(List.of(
+                        RedisKey.couponStock(100L),
+                        RedisKey.couponClaimHash(100L),
+                        RedisKey.couponClaimToken(100L, 8888L),
+                        RedisKey.couponRollbackGuard(100L, 8888L))),
+                eq("1001"), eq("8888"), eq(RedisKey.ROLLBACK_GUARD_TTL_SECONDS));
+    }
+
+    @Test
+    void useCoupon_shouldRejectAndReleaseWhenOrderCancelledConcurrentlyAfterInitialCheck() {
+        UserCoupon coupon = sampleCoupon(15L, 1001L, new BigDecimal("50.00"));
+        when(userCouponMapper.selectById(15L)).thenReturn(coupon);
+
+        OrderQueryResult unpaid = new OrderQueryResult();
+        unpaid.setOrderId("ORD-RACE");
+        unpaid.setUserId(1001L);
+        unpaid.setStatus(0);
+        unpaid.setTotalAmount(new BigDecimal("100.00"));
+
+        OrderQueryResult cancelled = new OrderQueryResult();
+        cancelled.setOrderId("ORD-RACE");
+        cancelled.setUserId(1001L);
+        cancelled.setStatus(2);
+        cancelled.setTotalAmount(new BigDecimal("100.00"));
+
+        when(orderFeignClient.getOrder("ORD-RACE")).thenReturn(R.ok(unpaid), R.ok(cancelled));
+        when(userCouponMapper.useCoupon(15L, 1001L, "ORD-RACE")).thenReturn(1);
+
+        CouponUseDTO dto = new CouponUseDTO();
+        dto.setUserCouponId(15L);
+        dto.setOrderId("ORD-RACE");
+
+        BizException ex = assertThrows(BizException.class, () -> couponService.useCoupon(dto),
+                "订单在核销窗口内被并发取消时，不得放行并让已核销券挂在已取消订单上");
+        assertEquals(ResultCode.ORDER_STATUS_INVALID.getCode(), ex.getCode());
+        verify(userCouponMapper).releaseCoupon(15L, 1001L, "ORD-RACE");
     }
 
     private UserCoupon sampleCoupon(long id, long userId, BigDecimal threshold) {

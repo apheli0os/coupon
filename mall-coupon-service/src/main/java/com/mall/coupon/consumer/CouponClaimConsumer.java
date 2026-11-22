@@ -57,8 +57,14 @@ public class CouponClaimConsumer {
                     String.valueOf(msg.getId()),
                     RedisKey.TOKEN_TTL_SECONDS));
             if (claimRes[0] != 1L) {
-                log.warn("领券凭证缺失或已被生产端回滚，跳过落库以防超发 templateId={} userId={} couponId={}",
-                        msg.getTemplateId(), msg.getUserId(), msg.getId());
+                if (userCouponMapper.selectById(msg.getId()) != null) {
+                    log.info("领券记录已落库，忽略凭证已过期的重复投递 templateId={} userId={} couponId={}",
+                            msg.getTemplateId(), msg.getUserId(), msg.getId());
+                } else {
+                    compensateExpiredTokenQuietly(msg, tokenKey);
+                    log.warn("领券凭证缺失、已被生产端回滚或已过期，拒绝落库并已触发幂等补偿校验 templateId={} userId={} couponId={}",
+                            msg.getTemplateId(), msg.getUserId(), msg.getId());
+                }
                 continue;
             }
             validMessages.add(msg);
@@ -82,13 +88,36 @@ public class CouponClaimConsumer {
             }
             int updated = templateMapper.incrReceivedBy(entry.getKey(), inserted);
             if (updated == 0) {
-                log.error("[ALERT] 模板已领计数触及库存上限，需人工对账 templateId={} inserted={}",
+                log.error("[ALERT] 模板已领计数触及库存上限，回滚事务以防静默超发 templateId={} inserted={}",
                         entry.getKey(), inserted);
+                throw new IllegalStateException("模板已领计数触及库存上限 templateId=" + entry.getKey()
+                        + " inserted=" + inserted);
             }
         }
         scheduleMarkTokensConsumed(validMessages);
         log.info("领券批量落库完成 received={} valid={} inserted={}",
                 messages.size(), validMessages.size(), totalInserted);
+    }
+
+    private void compensateExpiredTokenQuietly(CouponClaimMessage msg, String tokenKey) {
+        try {
+            long[] res = luaExecutor.parse(luaExecutor.execute(
+                    LuaScriptExecutor.SCRIPT_COUPON_EXPIRE_COMPENSATE,
+                    List.of(
+                            RedisKey.couponStock(msg.getTemplateId()),
+                            RedisKey.couponClaimHash(msg.getTemplateId()),
+                            tokenKey,
+                            RedisKey.couponRollbackGuard(msg.getTemplateId(), msg.getId())),
+                    String.valueOf(msg.getUserId()),
+                    RedisKey.ROLLBACK_GUARD_TTL_SECONDS));
+            if (res[0] == 0L) {
+                log.info("领券凭证 TTL 过期，消费端已幂等归还预扣库存 templateId={} userId={} couponId={}",
+                        msg.getTemplateId(), msg.getUserId(), msg.getId());
+            }
+        } catch (Exception e) {
+            log.error("领券凭证过期补偿归还 Redis 库存失败 templateId={} userId={} couponId={}",
+                    msg.getTemplateId(), msg.getUserId(), msg.getId(), e);
+        }
     }
 
     private void scheduleMarkTokensConsumed(List<CouponClaimMessage> messages) {

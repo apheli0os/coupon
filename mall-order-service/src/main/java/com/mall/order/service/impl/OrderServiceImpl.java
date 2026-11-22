@@ -40,21 +40,24 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createSeckillOrder(SeckillOrderMessage message) {
-        String tokenKey = RedisKey.seckillOrderToken(message.getActivityId(), message.getUserId());
-        if (orderMapper.selectById(message.getOrderId()) != null) {
-            markTokenConsumed(tokenKey, message.getOrderId());
-            log.info("订单已存在，幂等跳过 orderId={}", message.getOrderId());
+        String tokenKey = RedisKey.seckillOrderToken(message.getActivityId(), message.getOrderId());
+        SeckillOrder existing = orderMapper.selectById(message.getOrderId());
+        if (existing != null) {
+            if (!Integer.valueOf(2).equals(existing.getStatus())) {
+                markTokenConsumed(tokenKey, message.getOrderId());
+            }
+            log.info("订单已存在，幂等跳过 orderId={} status={}", message.getOrderId(), existing.getStatus());
             return;
         }
 
-        // 严格 CAS 认领凭证：token 缺失（生产端超时已回滚库存）或不匹配时一律拒绝落单，彻底消除超卖
         long[] claimRes = luaExecutor.parse(luaExecutor.execute(
                 LuaScriptExecutor.SCRIPT_TOKEN_CLAIM,
                 List.of(tokenKey),
                 message.getOrderId(),
                 RedisKey.TOKEN_TTL_SECONDS));
         if (claimRes[0] != 1L) {
-            log.warn("凭证缺失、已被生产端回滚或属于其他订单，拒绝落单以防超卖 orderId={} activityId={} userId={}",
+            compensateExpiredTokenQuietly(message, tokenKey);
+            log.warn("凭证缺失、已被生产端回滚或已过期，拒绝落单并已触发幂等补偿校验 orderId={} activityId={} userId={}",
                     message.getOrderId(), message.getActivityId(), message.getUserId());
             return;
         }
@@ -75,7 +78,7 @@ public class OrderServiceImpl implements OrderService {
 
         try {
             orderMapper.insert(order);
-            scheduleMarkTokenConsumed(tokenKey, message.getOrderId());
+            schedulePostOrderCreated(tokenKey, order);
             log.info("秒杀订单落库成功 orderId={} userId={}", order.getOrderId(), order.getUserId());
         } catch (DuplicateKeyException e) {
             // 主键 order_id 与活跃唯一索引 (activity_id, user_id, active_flag) 兜底幂等
@@ -191,7 +194,7 @@ public class OrderServiceImpl implements OrderService {
                         RedisKey.seckillStockBucket(order.getActivityId(), bucket),
                         RedisKey.seckillUsers(order.getActivityId()),
                         RedisKey.seckillOrderRollbackGuard(order.getActivityId(), order.getOrderId()),
-                        RedisKey.seckillOrderToken(order.getActivityId(), order.getUserId())),
+                        RedisKey.seckillOrderToken(order.getActivityId(), order.getOrderId())),
                 String.valueOf(order.getUserId()),
                 order.getOrderId(),
                 RedisKey.ROLLBACK_GUARD_TTL_SECONDS);
@@ -222,6 +225,58 @@ public class OrderServiceImpl implements OrderService {
             kafkaTemplate.send(CommonConstant.MQ_TOPIC_SECKILL_CANCEL, order.getOrderId(), event);
         } catch (Exception e) {
             log.warn("发送取消扣减销量事件失败（不影响核心库存一致性） orderId={}", order.getOrderId(), e);
+        }
+    }
+
+    private void compensateExpiredTokenQuietly(SeckillOrderMessage message, String tokenKey) {
+        try {
+            int bucket = message.getStockBucket() == null ? 0 : message.getStockBucket();
+            long[] res = luaExecutor.parse(luaExecutor.execute(
+                    LuaScriptExecutor.SCRIPT_SECKILL_EXPIRE_COMPENSATE,
+                    List.of(
+                            RedisKey.seckillStockBucket(message.getActivityId(), bucket),
+                            RedisKey.seckillUsers(message.getActivityId()),
+                            tokenKey,
+                            RedisKey.seckillOrderRollbackGuard(message.getActivityId(), message.getOrderId())),
+                    String.valueOf(message.getUserId()),
+                    RedisKey.ROLLBACK_GUARD_TTL_SECONDS));
+            if (res[0] == 0L) {
+                log.info("秒杀凭证 TTL 过期，消费端已幂等归还预扣库存 orderId={} activityId={} userId={} bucket={}",
+                        message.getOrderId(), message.getActivityId(), message.getUserId(), bucket);
+            }
+        } catch (Exception e) {
+            log.error("秒杀凭证过期补偿归还 Redis 库存失败 orderId={} activityId={}",
+                    message.getOrderId(), message.getActivityId(), e);
+        }
+    }
+
+    private void schedulePostOrderCreated(String tokenKey, SeckillOrder order) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    markTokenConsumed(tokenKey, order.getOrderId());
+                    publishOrderCreatedEventQuietly(order);
+                }
+            });
+        } else {
+            markTokenConsumed(tokenKey, order.getOrderId());
+            publishOrderCreatedEventQuietly(order);
+        }
+    }
+
+    private void publishOrderCreatedEventQuietly(SeckillOrder order) {
+        try {
+            SeckillOrderMessage event = new SeckillOrderMessage();
+            event.setOrderId(order.getOrderId());
+            event.setUserId(order.getUserId());
+            event.setActivityId(order.getActivityId());
+            event.setQuantity(order.getQuantity() == null ? 1 : order.getQuantity());
+            event.setStockBucket(order.getStockBucket());
+            event.setCreateTime(order.getCreateTime() == null ? LocalDateTime.now() : order.getCreateTime());
+            kafkaTemplate.send(CommonConstant.MQ_TOPIC_SECKILL_ORDER_CREATED, order.getOrderId(), event);
+        } catch (Exception e) {
+            log.warn("发送建单销量计数事件失败（不影响核心订单落库） orderId={}", order.getOrderId(), e);
         }
     }
 

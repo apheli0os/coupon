@@ -44,6 +44,14 @@ public class KafkaConfig {
     }
 
     @Bean
+    public NewTopic seckillOrderCreatedTopic() {
+        return TopicBuilder.name(CommonConstant.MQ_TOPIC_SECKILL_ORDER_CREATED)
+                .partitions(partitions)
+                .replicas(replicas)
+                .build();
+    }
+
+    @Bean
     public NewTopic seckillCancelTopic() {
         return TopicBuilder.name(CommonConstant.MQ_TOPIC_SECKILL_CANCEL)
                 .partitions(partitions)

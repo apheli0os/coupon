@@ -24,4 +24,12 @@ public class KafkaTopicConfig {
                 .replicas(replicas)
                 .build();
     }
+
+    @Bean
+    public NewTopic seckillCancelTopic() {
+        return TopicBuilder.name(CommonConstant.MQ_TOPIC_SECKILL_CANCEL)
+                .partitions(partitions)
+                .replicas(replicas)
+                .build();
+    }
 }

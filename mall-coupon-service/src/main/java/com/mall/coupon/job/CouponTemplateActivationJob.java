@@ -76,14 +76,19 @@ public class CouponTemplateActivationJob {
 
     private void endExpired(LocalDateTime now) {
         List<CouponTemplate> expired = templateMapper.selectList(new LambdaQueryWrapper<CouponTemplate>()
-                .eq(CouponTemplate::getStatus, CouponEnums.TEMPLATE_ACTIVE)
+                .in(CouponTemplate::getStatus, List.of(CouponEnums.TEMPLATE_DRAFT, CouponEnums.TEMPLATE_ACTIVE))
                 .le(CouponTemplate::getEndTime, now));
         for (CouponTemplate t : expired) {
+            String statusKey = RedisKey.couponStatus(t.getId());
+            if (Integer.valueOf(CouponEnums.TEMPLATE_DRAFT).equals(t.getStatus())
+                    && !RedisKey.STATUS_PREHEATED.equals(stringRedisTemplate.opsForValue().get(statusKey))) {
+                continue;
+            }
             t.setStatus(CouponEnums.TEMPLATE_ENDED);
             t.setUpdateTime(now);
             templateMapper.updateById(t);
             Duration ttl = RedisKey.activityKeyTtl(now, t.getEndTime());
-            stringRedisTemplate.opsForValue().set(RedisKey.couponStatus(t.getId()), RedisKey.STATUS_ENDED, ttl);
+            stringRedisTemplate.opsForValue().set(statusKey, RedisKey.STATUS_ENDED, ttl);
             multiLevelCache.invalidate(RedisKey.couponTemplateCache(t.getId()));
             log.info("优惠券模板到期自动结束 templateId={}", t.getId());
         }

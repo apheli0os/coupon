@@ -1,6 +1,7 @@
 package com.mall.seckill.service.impl;
 
 import com.mall.common.ResultCode;
+import com.mall.common.constants.RedisKey;
 import com.mall.common.context.UserContext;
 import com.mall.common.exception.BizException;
 import com.mall.common.metrics.BusinessMetrics;
@@ -75,13 +76,21 @@ class SeckillServiceImplTest {
         when(idGenerator.nextIdStr()).thenReturn("ORD-9001");
         when(kafkaTemplate.send(anyString(), eq("ORD-9001"), any()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("timeout")));
-        when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_SECKILL_ROLLBACK), anyList(), eq("1001"), eq("ORD-9001")))
+        when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_SECKILL_ROLLBACK), anyList(),
+                eq("1001"), eq("ORD-9001"), eq(RedisKey.ROLLBACK_GUARD_TTL_SECONDS)))
                 .thenReturn(List.of(0L, 10L));
         when(luaExecutor.parse(List.of(0L, 10L))).thenReturn(new long[]{0L, 10L});
 
         BizException ex = assertThrows(BizException.class, () -> seckillService.seckill(2001L));
         assertEquals(ResultCode.MQ_SEND_FAILED.getCode(), ex.getCode());
-        verify(luaExecutor).execute(eq(LuaScriptExecutor.SCRIPT_SECKILL_ROLLBACK), anyList(), eq("1001"), eq("ORD-9001"));
+        verify(valueOps).set(eq(RedisKey.seckillOrderToken(2001L, "ORD-9001")), eq("ORD-9001"), any());
+        verify(luaExecutor).execute(eq(LuaScriptExecutor.SCRIPT_SECKILL_ROLLBACK),
+                eq(List.of(
+                        RedisKey.seckillStockBucket(2001L, 4),
+                        RedisKey.seckillUsers(2001L),
+                        RedisKey.seckillOrderToken(2001L, "ORD-9001"),
+                        RedisKey.seckillOrderRollbackGuard(2001L, "ORD-9001"))),
+                eq("1001"), eq("ORD-9001"), eq(RedisKey.ROLLBACK_GUARD_TTL_SECONDS));
     }
 
     @Test
@@ -94,7 +103,8 @@ class SeckillServiceImplTest {
         when(kafkaTemplate.send(anyString(), eq("ORD-9002"), any()))
                 .thenReturn(CompletableFuture.failedFuture(new RuntimeException("ack timeout")));
         // code == 2 表示消费端已原子认领该订单凭证，严禁回滚库存
-        when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_SECKILL_ROLLBACK), anyList(), eq("1001"), eq("ORD-9002")))
+        when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_SECKILL_ROLLBACK), anyList(),
+                eq("1001"), eq("ORD-9002"), eq(RedisKey.ROLLBACK_GUARD_TTL_SECONDS)))
                 .thenReturn(List.of(2L, 9L));
         when(luaExecutor.parse(List.of(2L, 9L))).thenReturn(new long[]{2L, 9L});
 

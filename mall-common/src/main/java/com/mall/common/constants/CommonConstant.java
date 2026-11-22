@@ -27,7 +27,8 @@ public final class CommonConstant {
     public static final String MQ_GROUP_COUPON_CLAIM = "coupon-claim-consumer-group";
     /** 秒杀订单消费失败重试耗尽后的死信 topic */
     public static final String MQ_TOPIC_SECKILL_DLQ = "seckill-topic.DLQ";
-    /** 秒杀订单取消事件 topic（供秒杀服务异步扣减展示销量 sold_count） */
+    public static final String MQ_TOPIC_SECKILL_ORDER_CREATED = "seckill-order-created-topic";
     public static final String MQ_TOPIC_SECKILL_CANCEL = "seckill-cancel-topic";
     public static final String MQ_GROUP_SECKILL_SOLD = "seckill-sold-counter-group";
+    public static final String MQ_GROUP_COUPON_CANCEL_REFUND = "coupon-cancel-refund-group";
 }

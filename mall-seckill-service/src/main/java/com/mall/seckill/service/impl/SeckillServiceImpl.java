@@ -91,7 +91,7 @@ public class SeckillServiceImpl implements SeckillService {
         }
 
         String orderId = idGenerator.nextIdStr();
-        String tokenKey = RedisKey.seckillOrderToken(activityId, userId);
+        String tokenKey = RedisKey.seckillOrderToken(activityId, orderId);
         boolean tokenWritten = false;
         try {
             // 本地凭证：消费端通过 Lua CAS 认领，避免生产端超时回滚后延迟消息仍落单导致超卖
@@ -153,9 +153,11 @@ public class SeckillServiceImpl implements SeckillService {
                         List.of(
                                 RedisKey.seckillStockBucket(activityId, bucket),
                                 RedisKey.seckillUsers(activityId),
-                                RedisKey.seckillOrderToken(activityId, userId)),
+                                RedisKey.seckillOrderToken(activityId, orderId),
+                                RedisKey.seckillOrderRollbackGuard(activityId, orderId)),
                         String.valueOf(userId),
-                        orderId));
+                        orderId,
+                        RedisKey.ROLLBACK_GUARD_TTL_SECONDS));
                 return res[0];
             }
             long[] res = luaExecutor.parse(luaExecutor.execute(

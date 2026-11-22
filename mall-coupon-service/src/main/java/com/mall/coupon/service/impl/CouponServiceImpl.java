@@ -147,9 +147,11 @@ public class CouponServiceImpl implements CouponService {
                         List.of(
                                 RedisKey.couponStock(templateId),
                                 RedisKey.couponClaimHash(templateId),
-                                RedisKey.couponClaimToken(templateId, userCouponId)),
+                                RedisKey.couponClaimToken(templateId, userCouponId),
+                                RedisKey.couponRollbackGuard(templateId, userCouponId)),
                         String.valueOf(userId),
-                        String.valueOf(userCouponId)));
+                        String.valueOf(userCouponId),
+                        RedisKey.ROLLBACK_GUARD_TTL_SECONDS));
                 return res[0];
             }
             long[] res = luaExecutor.parse(luaExecutor.execute(
@@ -223,7 +225,32 @@ public class CouponServiceImpl implements CouponService {
         if (rows == 0) {
             throw new BizException(ResultCode.COUPON_ALREADY_USED);
         }
+        recheckOrderUnpaidOrRelease(dto, userId);
         log.info("优惠券核销成功 userId={} couponId={} orderId={}", userId, dto.getUserCouponId(), dto.getOrderId());
+    }
+
+    private void recheckOrderUnpaidOrRelease(CouponUseDTO dto, long userId) {
+        R<OrderQueryResult> recheckResp;
+        try {
+            recheckResp = orderFeignClient.getOrder(dto.getOrderId());
+        } catch (Exception e) {
+            userCouponMapper.releaseCoupon(dto.getUserCouponId(), userId, dto.getOrderId());
+            log.warn("核销后复核订单异常，已释放优惠券 userId={} couponId={} orderId={} cause={}",
+                    userId, dto.getUserCouponId(), dto.getOrderId(), e.getMessage());
+            throw new BizException(ResultCode.SYSTEM_ERROR, "订单状态复核失败，优惠券已退回");
+        }
+        if (recheckResp == null || !recheckResp.isSuccess()) {
+            userCouponMapper.releaseCoupon(dto.getUserCouponId(), userId, dto.getOrderId());
+            throw new BizException(ResultCode.SYSTEM_ERROR, "订单状态复核失败，优惠券已退回");
+        }
+        OrderQueryResult latestOrder = recheckResp.getData();
+        if (latestOrder == null || !Integer.valueOf(0).equals(latestOrder.getStatus())) {
+            userCouponMapper.releaseCoupon(dto.getUserCouponId(), userId, dto.getOrderId());
+            log.warn("核销窗口内订单状态已变更，已回滚优惠券 userId={} couponId={} orderId={} latestStatus={}",
+                    userId, dto.getUserCouponId(), dto.getOrderId(),
+                    latestOrder == null ? null : latestOrder.getStatus());
+            throw new BizException(ResultCode.ORDER_STATUS_INVALID, "订单状态已变更，仅待支付订单可使用优惠券");
+        }
     }
 
     @Override

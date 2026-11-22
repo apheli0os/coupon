@@ -19,10 +19,13 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -60,20 +63,26 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void createSeckillOrder_shouldRejectWhenTokenMissingOrRolledBack() {
+    void createSeckillOrder_shouldRejectAndTriggerExpireCompensationWhenTokenMissing() {
         SeckillOrderMessage msg = sampleMessage("ORD-1", 2001L, 1001L);
         when(orderMapper.selectById("ORD-1")).thenReturn(null);
         when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_TOKEN_CLAIM), anyList(), any(), any()))
                 .thenReturn(List.of(0L, 0L));
+        when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_SECKILL_EXPIRE_COMPENSATE), anyList(), any(), any()))
+                .thenReturn(List.of(0L, 10L));
         when(luaExecutor.parse(List.of(0L, 0L))).thenReturn(new long[]{0L, 0L});
+        when(luaExecutor.parse(List.of(0L, 10L))).thenReturn(new long[]{0L, 10L});
 
         orderService.createSeckillOrder(msg);
 
         verify(orderMapper, never()).insert(any(SeckillOrder.class));
+        verify(kafkaTemplate, never()).send(eq(CommonConstant.MQ_TOPIC_SECKILL_ORDER_CREATED), any(), any());
+        verify(luaExecutor).execute(eq(LuaScriptExecutor.SCRIPT_SECKILL_EXPIRE_COMPENSATE),
+                anyList(), eq("1001"), any());
     }
 
     @Test
-    void createSeckillOrder_shouldInsertAndMarkConsumedWhenTokenClaimed() {
+    void createSeckillOrder_shouldInsertMarkConsumedAndPublishOrderCreatedWhenTokenClaimed() {
         SeckillOrderMessage msg = sampleMessage("ORD-2", 2001L, 1001L);
         when(orderMapper.selectById("ORD-2")).thenReturn(null);
         when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_TOKEN_CLAIM), anyList(), any(), any()))
@@ -83,7 +92,8 @@ class OrderServiceImplTest {
         orderService.createSeckillOrder(msg);
 
         verify(orderMapper).insert(any(SeckillOrder.class));
-        verify(valueOps).set(eq("seckill:{2001}:token:1001"), eq("CONSUMED:ORD-2"), any(Duration.class));
+        verify(valueOps).set(eq("seckill:{2001}:token:ORD-2"), eq("CONSUMED:ORD-2"), any(Duration.class));
+        verify(kafkaTemplate).send(eq(CommonConstant.MQ_TOPIC_SECKILL_ORDER_CREATED), eq("ORD-2"), any());
     }
 
     @Test
@@ -135,6 +145,52 @@ class OrderServiceImplTest {
 
         verify(orderMapper).cancel("ORD-6");
         verify(orderMapper, never()).markStockRestored("ORD-6");
+    }
+
+    @Test
+    void createSeckillOrder_redeliveryOfCancelledOrderMustNotOverwriteNewOrdersToken() {
+        Map<String, String> redisStore = new HashMap<>();
+        Map<String, SeckillOrder> dbOrders = new HashMap<>();
+
+        SeckillOrder cancelledOrd1 = sampleOrder("ORD-1", 2001L, 1001L);
+        cancelledOrd1.setStatus(2);
+        cancelledOrd1.setStockRestored(1);
+        dbOrders.put("ORD-1", cancelledOrd1);
+
+        String ord2TokenKey = com.mall.common.constants.RedisKey.seckillOrderToken(2001L, "ORD-2");
+        redisStore.put(ord2TokenKey, "ORD-2");
+
+        when(orderMapper.selectById(any())).thenAnswer(inv -> dbOrders.get(inv.getArgument(0)));
+        when(orderMapper.insert(any(SeckillOrder.class))).thenAnswer(inv -> {
+            SeckillOrder o = inv.getArgument(0);
+            dbOrders.put(o.getOrderId(), o);
+            return 1;
+        });
+        org.mockito.Mockito.doAnswer(inv -> {
+            redisStore.put(inv.getArgument(0), inv.getArgument(1));
+            return null;
+        }).when(valueOps).set(any(), any(), any(Duration.class));
+        when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_TOKEN_CLAIM), anyList(), any(), any()))
+                .thenAnswer(inv -> {
+                    List<String> keys = inv.getArgument(1);
+                    String expected = String.valueOf((Object) inv.getArgument(2));
+                    String cur = redisStore.get(keys.get(0));
+                    if (expected.equals(cur) || ("PROCESSING:" + expected).equals(cur)) {
+                        redisStore.put(keys.get(0), "PROCESSING:" + expected);
+                        return List.of(1L, 0L);
+                    }
+                    return List.of(0L, 0L);
+                });
+        when(luaExecutor.parse(any())).thenAnswer(inv -> {
+            List<?> raw = inv.getArgument(0);
+            return new long[]{((Number) raw.get(0)).longValue(), ((Number) raw.get(1)).longValue()};
+        });
+
+        orderService.createSeckillOrder(sampleMessage("ORD-1", 2001L, 1001L));
+        orderService.createSeckillOrder(sampleMessage("ORD-2", 2001L, 1001L));
+
+        assertTrue(dbOrders.containsKey("ORD-2"),
+                "已取消订单 ORD-1 的延迟重投不得覆盖同用户新订单 ORD-2 的凭证，导致 ORD-2 被拒单并永久泄漏库存");
     }
 
     private SeckillOrderMessage sampleMessage(String orderId, long activityId, long userId) {

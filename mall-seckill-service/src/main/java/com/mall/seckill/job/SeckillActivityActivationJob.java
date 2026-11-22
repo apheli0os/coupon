@@ -75,14 +75,19 @@ public class SeckillActivityActivationJob {
 
     private void endExpired(LocalDateTime now) {
         List<SeckillActivity> expired = activityMapper.selectList(new LambdaQueryWrapper<SeckillActivity>()
-                .eq(SeckillActivity::getStatus, 1)
+                .in(SeckillActivity::getStatus, List.of(0, 1))
                 .le(SeckillActivity::getEndTime, now));
         for (SeckillActivity activity : expired) {
+            String statusKey = RedisKey.seckillStatus(activity.getId());
+            if (Integer.valueOf(0).equals(activity.getStatus())
+                    && !RedisKey.STATUS_PREHEATED.equals(stringRedisTemplate.opsForValue().get(statusKey))) {
+                continue;
+            }
             activity.setStatus(2);
             activity.setUpdateTime(now);
             activityMapper.updateById(activity);
             Duration ttl = RedisKey.activityKeyTtl(now, activity.getEndTime());
-            stringRedisTemplate.opsForValue().set(RedisKey.seckillStatus(activity.getId()), RedisKey.STATUS_ENDED, ttl);
+            stringRedisTemplate.opsForValue().set(statusKey, RedisKey.STATUS_ENDED, ttl);
             multiLevelCache.invalidate(RedisKey.seckillActivityCache(activity.getId()));
             log.info("秒杀活动到期自动结束 activityId={}", activity.getId());
         }

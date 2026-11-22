@@ -17,6 +17,8 @@ class RedisKeyTest {
         assertTrue(RedisKey.couponClaimHash(templateId).contains(tag));
         assertTrue(RedisKey.couponStatus(templateId).contains(tag));
         assertTrue(RedisKey.couponTemplateCache(templateId).contains(tag));
+        assertTrue(RedisKey.couponClaimToken(templateId, 99L).contains(tag));
+        assertTrue(RedisKey.couponRollbackGuard(templateId, 99L).contains(tag));
     }
 
     @Test
@@ -27,7 +29,11 @@ class RedisKeyTest {
         assertTrue(RedisKey.seckillStock(activityId).contains(tag));
         assertTrue(RedisKey.seckillUsers(activityId).contains(tag));
         assertTrue(RedisKey.seckillStatus(activityId).contains(tag));
-        assertTrue(RedisKey.seckillOrderToken(activityId, 1L).contains(tag));
+        assertTrue(RedisKey.seckillOrderToken(activityId, "ORD-1").contains(tag));
+        assertNotEquals(RedisKey.seckillOrderToken(activityId, "ORD-1"),
+                RedisKey.seckillOrderToken(activityId, "ORD-2"),
+                "秒杀凭证必须按 orderId 隔离，避免同用户重买冲突");
+        assertTrue(RedisKey.seckillSoldState(activityId, "ORD-1").contains(tag));
     }
 
     @Test
@@ -44,7 +50,10 @@ class RedisKeyTest {
 
     @Test
     void luaScripts_shouldExistAsResources() {
-        for (String name : new String[]{"coupon_claim.lua", "coupon_rollback.lua", "seckill.lua", "seckill_rollback.lua"}) {
+        for (String name : new String[]{
+                "coupon_claim.lua", "coupon_rollback.lua", "coupon_expire_compensate.lua",
+                "seckill.lua", "seckill_rollback.lua", "seckill_expire_compensate.lua",
+                "seckill_cancel_rollback.lua", "seckill_sold_state.lua", "token_claim.lua"}) {
             assertNotNull(getClass().getClassLoader().getResource("lua/" + name), "缺少 Lua 脚本: " + name);
         }
     }

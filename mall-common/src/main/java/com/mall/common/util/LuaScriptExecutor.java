@@ -23,9 +23,12 @@ public class LuaScriptExecutor {
 
     public static final String SCRIPT_COUPON_CLAIM = "lua/coupon_claim.lua";
     public static final String SCRIPT_COUPON_ROLLBACK = "lua/coupon_rollback.lua";
+    public static final String SCRIPT_COUPON_EXPIRE_COMPENSATE = "lua/coupon_expire_compensate.lua";
     public static final String SCRIPT_SECKILL = "lua/seckill.lua";
     public static final String SCRIPT_SECKILL_ROLLBACK = "lua/seckill_rollback.lua";
+    public static final String SCRIPT_SECKILL_EXPIRE_COMPENSATE = "lua/seckill_expire_compensate.lua";
     public static final String SCRIPT_SECKILL_CANCEL_ROLLBACK = "lua/seckill_cancel_rollback.lua";
+    public static final String SCRIPT_SECKILL_SOLD_STATE = "lua/seckill_sold_state.lua";
     public static final String SCRIPT_TOKEN_CLAIM = "lua/token_claim.lua";
 
     private final StringRedisTemplate stringRedisTemplate;
