@@ -279,6 +279,7 @@
                     <version>${surefire.version}</version>
                     <configuration>
                         <skipITs>${skip.it}</skipITs>
+                        <classesDirectory>${project.build.outputDirectory}</classesDirectory>
                         <includes>
                             <include>**/*IT.java</include>
                         </includes>
