@@ -1,13 +1,22 @@
 package com.mall.order.service.impl;
 
+import com.mall.common.R;
 import com.mall.common.ResultCode;
 import com.mall.common.constants.CommonConstant;
 import com.mall.common.constants.RedisKey;
 import com.mall.common.exception.BizException;
+import com.mall.common.message.CouponLockRequest;
+import com.mall.common.message.CouponLockResult;
+import com.mall.common.message.CouponUnlockRequest;
+import com.mall.common.message.OrderPaidMessage;
 import com.mall.common.message.OrderQueryResult;
 import com.mall.common.message.SeckillOrderMessage;
+import com.mall.common.pricing.CouponPricing;
+import com.mall.common.pricing.CouponPricingResult;
+import com.mall.common.pricing.CouponPricingRule;
 import com.mall.common.util.LuaScriptExecutor;
 import com.mall.order.domain.entity.SeckillOrder;
+import com.mall.order.feign.CouponFeignClient;
 import com.mall.order.mapper.SeckillOrderMapper;
 import com.mall.order.service.OrderService;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -36,6 +46,7 @@ public class OrderServiceImpl implements OrderService {
     private final LuaScriptExecutor luaExecutor;
     private final TransactionTemplate transactionTemplate;
     private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final CouponFeignClient couponFeignClient;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -66,11 +77,15 @@ public class OrderServiceImpl implements OrderService {
         order.setOrderId(message.getOrderId());
         order.setUserId(message.getUserId());
         order.setActivityId(message.getActivityId());
+        order.setProductCode(message.getProductCode());
         order.setProductName(message.getProductName());
         order.setSeckillPrice(message.getSeckillPrice());
         order.setQuantity(message.getQuantity() == null ? Integer.valueOf(1) : message.getQuantity());
         BigDecimal price = message.getSeckillPrice() == null ? BigDecimal.ZERO : message.getSeckillPrice();
-        order.setTotalAmount(price.multiply(BigDecimal.valueOf(order.getQuantity())));
+        BigDecimal totalAmount = price.multiply(BigDecimal.valueOf(order.getQuantity()));
+        order.setTotalAmount(totalAmount);
+        order.setDiscountAmount(BigDecimal.ZERO);
+        order.setPayAmount(totalAmount);
         order.setStockBucket(message.getStockBucket() == null ? Integer.valueOf(0) : message.getStockBucket());
         order.setStatus(0);
         order.setStockRestored(0);
@@ -135,17 +150,144 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void pay(String orderId, long userId) {
+        transactionTemplate.execute(txStatus -> {
+            SeckillOrder order = orderMapper.selectById(orderId);
+            if (order == null) {
+                throw new BizException(ResultCode.ORDER_NOT_FOUND);
+            }
+            if (!Long.valueOf(userId).equals(order.getUserId())) {
+                throw new BizException(ResultCode.FORBIDDEN, "无权支付他人订单");
+            }
+            if (orderMapper.pay(orderId) == 0) {
+                throw new BizException(ResultCode.ORDER_STATUS_INVALID);
+            }
+            return Boolean.TRUE;
+        });
+        SeckillOrder paidOrder = orderMapper.selectById(orderId);
+        if (paidOrder != null) {
+            publishOrderPaidEventQuietly(paidOrder);
+        }
+    }
+
+    @Override
+    public SeckillOrder applyCoupon(String orderId, long userId, Long userCouponId) {
+        if (!StringUtils.hasText(orderId) || userCouponId == null) {
+            throw new BizException(ResultCode.PARAM_ERROR, "订单号或优惠券 ID 不能为空");
+        }
         SeckillOrder order = orderMapper.selectById(orderId);
         if (order == null) {
             throw new BizException(ResultCode.ORDER_NOT_FOUND);
         }
         if (!Long.valueOf(userId).equals(order.getUserId())) {
-            throw new BizException(ResultCode.FORBIDDEN, "无权支付他人订单");
+            throw new BizException(ResultCode.FORBIDDEN, "无权操作他人订单");
         }
-        if (orderMapper.pay(orderId) == 0) {
+        if (!Integer.valueOf(0).equals(order.getStatus())) {
             throw new BizException(ResultCode.ORDER_STATUS_INVALID);
+        }
+        if (order.getCouponId() != null) {
+            if (order.getCouponId().equals(userCouponId)) {
+                return order;
+            }
+            throw new BizException(ResultCode.ORDER_COUPON_ALREADY_APPLIED);
+        }
+
+        CouponLockRequest lockRequest = new CouponLockRequest();
+        lockRequest.setUserId(userId);
+        lockRequest.setOrderId(orderId);
+        lockRequest.setUserCouponId(userCouponId);
+        lockRequest.setOrderAmount(order.getTotalAmount());
+        lockRequest.setProductCode(order.getProductCode());
+
+        R<CouponLockResult> lockResp;
+        try {
+            lockResp = couponFeignClient.lockCoupon(lockRequest);
+        } catch (Exception e) {
+            log.error("调用优惠券锁券服务失败 orderId={} userId={} couponId={} cause={}",
+                    orderId, userId, userCouponId, e.getMessage());
+            throw new BizException(ResultCode.SYSTEM_ERROR, "优惠券服务暂不可用，请稍后重试");
+        }
+        if (lockResp == null) {
+            throw new BizException(ResultCode.SYSTEM_ERROR, "优惠券服务暂不可用，请稍后重试");
+        }
+        if (!lockResp.isSuccess()) {
+            throw new BizException(lockResp.getCode(), lockResp.getMessage());
+        }
+        CouponLockResult lock = lockResp.getData();
+        if (lock == null) {
+            throw new BizException(ResultCode.SYSTEM_ERROR, "优惠券服务响应异常");
+        }
+
+        verifyCrossPricingOrUnlock(order, userId, userCouponId, lock);
+
+        int updated = orderMapper.applyCoupon(
+                orderId, userId, userCouponId, lock.getDiscountAmount(), lock.getPayAmount());
+        if (updated == 0) {
+            SeckillOrder latest = orderMapper.selectById(orderId);
+            if (latest != null && userCouponId.equals(latest.getCouponId())) {
+                return latest;
+            }
+            unlockCouponQuietly(userId, orderId, userCouponId);
+            if (latest != null && latest.getCouponId() != null) {
+                throw new BizException(ResultCode.ORDER_COUPON_ALREADY_APPLIED);
+            }
+            throw new BizException(ResultCode.ORDER_STATUS_INVALID);
+        }
+        return orderMapper.selectById(orderId);
+    }
+
+    private void verifyCrossPricingOrUnlock(
+            SeckillOrder order,
+            long userId,
+            Long userCouponId,
+            CouponLockResult lock) {
+        CouponPricingResult verified;
+        try {
+            CouponPricingRule rule = new CouponPricingRule(
+                    lock.getType() == null ? 0 : lock.getType(),
+                    lock.getDiscountValue(),
+                    lock.getMaxDiscountAmount(),
+                    lock.getThreshold(),
+                    lock.getTarget() == null ? 0 : lock.getTarget(),
+                    lock.getProductCode());
+            verified = CouponPricing.calculate(
+                    rule, order.getTotalAmount(), order.getProductCode());
+        } catch (BizException ex) {
+            unlockCouponQuietly(userId, order.getOrderId(), userCouponId);
+            throw new BizException(ResultCode.ORDER_AMOUNT_MISMATCH);
+        }
+        if (lock.getDiscountAmount() == null
+                || lock.getPayAmount() == null
+                || verified.discountAmount().compareTo(lock.getDiscountAmount()) != 0
+                || verified.payAmount().compareTo(lock.getPayAmount()) != 0) {
+            unlockCouponQuietly(userId, order.getOrderId(), userCouponId);
+            throw new BizException(ResultCode.ORDER_AMOUNT_MISMATCH);
+        }
+    }
+
+    private void unlockCouponQuietly(long userId, String orderId, Long userCouponId) {
+        try {
+            CouponUnlockRequest unlockReq = new CouponUnlockRequest();
+            unlockReq.setUserId(userId);
+            unlockReq.setOrderId(orderId);
+            unlockReq.setUserCouponId(userCouponId);
+            couponFeignClient.unlockCoupon(unlockReq);
+        } catch (Exception e) {
+            log.error("补偿解锁优惠券失败，待巡检任务兜底 orderId={} userId={} couponId={}",
+                    orderId, userId, userCouponId, e);
+        }
+    }
+
+    private void publishOrderPaidEventQuietly(SeckillOrder order) {
+        try {
+            OrderPaidMessage event = new OrderPaidMessage();
+            event.setOrderId(order.getOrderId());
+            event.setUserId(order.getUserId());
+            event.setCouponId(order.getCouponId());
+            event.setPayTime(LocalDateTime.now());
+            kafkaTemplate.send(CommonConstant.MQ_TOPIC_ORDER_PAID, order.getOrderId(), event);
+        } catch (Exception e) {
+            log.warn("发送订单支付成功事件失败（待巡检任务兜底核销） orderId={}", order.getOrderId(), e);
         }
     }
 
@@ -311,8 +453,12 @@ public class OrderServiceImpl implements OrderService {
         result.setUserId(order.getUserId());
         result.setStatus(order.getStatus());
         result.setStatusDesc(statusDesc(order.getStatus()));
+        result.setProductCode(order.getProductCode());
         result.setProductName(order.getProductName());
         result.setTotalAmount(order.getTotalAmount());
+        result.setCouponId(order.getCouponId());
+        result.setDiscountAmount(order.getDiscountAmount());
+        result.setPayAmount(order.getPayAmount() == null ? order.getTotalAmount() : order.getPayAmount());
         return result;
     }
 

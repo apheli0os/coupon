@@ -47,6 +47,7 @@ class AuthGlobalFilterTest {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                 .header("X-User-Id", "9999")
                 .header("X-User-Role", "ADMIN")
+                .header("X-Internal-Key", "forged-internal-key")
                 .build();
         MockServerWebExchange exchange = MockServerWebExchange.from(request);
 
@@ -62,6 +63,7 @@ class AuthGlobalFilterTest {
         HttpHeaders headers = forwarded.get().getRequest().getHeaders();
         assertEquals(List.of("1001"), headers.get("X-User-Id"), "必须覆盖而非追加 X-User-Id");
         assertEquals(List.of("USER"), headers.get("X-User-Role"), "必须覆盖而非追加 X-User-Role");
+        assertNull(headers.getFirst("X-Internal-Key"));
     }
 
     @Test
@@ -85,6 +87,30 @@ class AuthGlobalFilterTest {
     }
 
     @Test
+    void shouldBlockInternalEndpointsWithMatrixParamsOrEncodedSegment() {
+        String token = issueToken(1001L, "USER");
+        for (String bypassPath : List.of(
+                "/api/coupon/internal;bypass=1/settlement/unlock",
+                "/api/orders/internal;x=1/ORD-1/apply-coupon",
+                "/api/coupon/%69nternal/settlement/unlock")) {
+            MockServerHttpRequest request = MockServerHttpRequest.post(bypassPath)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                    .header("X-Internal-Key", "mall-coupon-platform-default-internal-key-2026")
+                    .build();
+            MockServerWebExchange exchange = MockServerWebExchange.from(request);
+
+            AtomicReference<Boolean> called = new AtomicReference<>(false);
+            filter.filter(exchange, ex -> {
+                called.set(true);
+                return Mono.empty();
+            }).block();
+
+            assertFalse(called.get());
+            assertEquals(HttpStatus.FORBIDDEN, exchange.getResponse().getStatusCode());
+        }
+    }
+
+    @Test
     void shouldRejectMissingOrInvalidJwtWithUnauthorized() {
         MockServerHttpRequest request = MockServerHttpRequest.get("/api/orders/12345")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer invalid.token.here")
@@ -101,6 +127,7 @@ class AuthGlobalFilterTest {
         MockServerHttpRequest request = MockServerHttpRequest.get("/api/auth/token")
                 .header("X-User-Id", "9999")
                 .header("X-User-Role", "ADMIN")
+                .header("X-Internal-Key", "forged-internal-key")
                 .build();
         MockServerWebExchange exchange = MockServerWebExchange.from(request);
 
@@ -113,5 +140,6 @@ class AuthGlobalFilterTest {
         assertNotNull(forwarded.get());
         assertNull(forwarded.get().getRequest().getHeaders().getFirst("X-User-Id"));
         assertNull(forwarded.get().getRequest().getHeaders().getFirst("X-User-Role"));
+        assertNull(forwarded.get().getRequest().getHeaders().getFirst("X-Internal-Key"));
     }
 }

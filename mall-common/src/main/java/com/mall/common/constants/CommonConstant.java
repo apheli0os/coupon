@@ -9,6 +9,8 @@ public final class CommonConstant {
     public static final String USER_ID_HEADER = "X-User-Id";
     /** 用户角色请求头，由网关从 JWT 解析并覆盖注入 */
     public static final String USER_ROLE_HEADER = "X-User-Role";
+    public static final String INTERNAL_AUTH_HEADER = "X-Internal-Key";
+    public static final String DEFAULT_INTERNAL_KEY = "mall-coupon-platform-default-internal-key-2026";
     public static final String ROLE_USER = "USER";
     public static final String ROLE_ADMIN = "ADMIN";
 
@@ -31,4 +33,6 @@ public final class CommonConstant {
     public static final String MQ_TOPIC_SECKILL_CANCEL = "seckill-cancel-topic";
     public static final String MQ_GROUP_SECKILL_SOLD = "seckill-sold-counter-group";
     public static final String MQ_GROUP_COUPON_CANCEL_REFUND = "coupon-cancel-refund-group";
+    public static final String MQ_TOPIC_ORDER_PAID = "order-paid-topic";
+    public static final String MQ_GROUP_COUPON_ORDER_PAID = "coupon-order-paid-group";
 }

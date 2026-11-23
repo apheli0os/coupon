@@ -29,11 +29,18 @@ AdvanceToAfter ==
 \* Admin calls publish() (only allowed when now # "after")
 Publish ==
   /\ now # "after"
+  /\ dbStatus # 2
   /\ IF now = "before"
      THEN /\ dbStatus' = 0
           /\ redisStatus' = "0"
      ELSE /\ dbStatus' = 1
           /\ redisStatus' = "1"
+  /\ UNCHANGED <<now, jobTickedAfter>>
+
+Terminate ==
+  /\ dbStatus \in {0, 1}
+  /\ dbStatus' = 2
+  /\ redisStatus' = "2"
   /\ UNCHANGED <<now, jobTickedAfter>>
 
 \* ActivationJob.activatePreheated(): WHERE status=0 AND start<=now AND end>now, Redis=="0"
@@ -72,6 +79,7 @@ Next ==
   \/ AdvanceToDuring
   \/ AdvanceToAfter
   \/ Publish
+  \/ Terminate
   \/ JobActivatePreheated
   \/ JobEndExpired
   \/ JobTickIdleAfter
@@ -83,5 +91,8 @@ Next ==
 \* it must be ENDED (2), never stuck in DRAFT/PREHEATED (0)!
 PublishedMustEndAfterEndTime ==
   (now = "after" /\ jobTickedAfter /\ redisStatus # "none") => (dbStatus = 2 /\ redisStatus = "2")
+
+TerminatedStaysEnded ==
+  (dbStatus = 2) => (redisStatus = "2")
 
 ====

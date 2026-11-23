@@ -10,9 +10,11 @@ import org.springframework.core.Ordered;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.server.PathContainer;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ServerWebExchange;
+import org.springframework.web.util.UriUtils;
 import reactor.core.publisher.Mono;
 
 import javax.crypto.SecretKey;
@@ -29,6 +31,7 @@ public final class AuthGlobalFilter implements GlobalFilter, Ordered {
 
     private static final String USER_ID_HEADER = "X-User-Id";
     private static final String USER_ROLE_HEADER = "X-User-Role";
+    private static final String INTERNAL_AUTH_HEADER = "X-Internal-Key";
     private static final String DEFAULT_ROLE = "USER";
     private static final List<String> WHITE_LIST = List.of("/api/auth/token", "/actuator/health");
 
@@ -40,17 +43,16 @@ public final class AuthGlobalFilter implements GlobalFilter, Ordered {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
-        String path = exchange.getRequest().getPath().value();
-        // 内部 Feign 接口禁止从网关外部访问
-        if (path.contains("/internal/")) {
+        if (isInternalPath(exchange)) {
             return writeError(exchange, HttpStatus.FORBIDDEN, 403, "禁止访问内部接口");
         }
+        String path = exchange.getRequest().getPath().value();
         if (WHITE_LIST.stream().anyMatch(path::startsWith)) {
-            // 白名单路径同样清除外部伪造的身份头
             ServerWebExchange cleaned = exchange.mutate()
                     .request(builder -> builder.headers(headers -> {
                         headers.remove(USER_ID_HEADER);
                         headers.remove(USER_ROLE_HEADER);
+                        headers.remove(INTERNAL_AUTH_HEADER);
                     }))
                     .build();
             return chain.filter(cleaned);
@@ -63,14 +65,51 @@ public final class AuthGlobalFilter implements GlobalFilter, Ordered {
             return writeError(exchange, HttpStatus.UNAUTHORIZED, 401, "未登录或登录已失效");
         }
         String role = extractRole(claims);
-        // 必须用 headers.set 覆盖（而非 builder.header 追加），彻底阻断伪造 X-User-Id 越权与绕过限流
         ServerWebExchange mutated = exchange.mutate()
                 .request(builder -> builder.headers(headers -> {
                     headers.set(USER_ID_HEADER, String.valueOf(userId));
                     headers.set(USER_ROLE_HEADER, role);
+                    headers.remove(INTERNAL_AUTH_HEADER);
                 }))
                 .build();
         return chain.filter(mutated);
+    }
+
+    private boolean isInternalPath(ServerWebExchange exchange) {
+        PathContainer path = exchange.getRequest().getPath().pathWithinApplication();
+        for (PathContainer.Element element : path.elements()) {
+            if (element instanceof PathContainer.PathSegment segment) {
+                if (isInternalSegment(segment.valueToMatch()) || isInternalSegment(segment.value())) {
+                    return true;
+                }
+            }
+        }
+        for (String rawSegment : path.value().split("/")) {
+            if (isInternalSegment(rawSegment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isInternalSegment(String segment) {
+        if (!StringUtils.hasText(segment)) {
+            return false;
+        }
+        if ("internal".equalsIgnoreCase(stripMatrix(segment))) {
+            return true;
+        }
+        try {
+            String decoded = UriUtils.decode(segment, StandardCharsets.UTF_8);
+            return "internal".equalsIgnoreCase(stripMatrix(decoded));
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
+    private String stripMatrix(String segment) {
+        int semi = segment.indexOf(';');
+        return semi >= 0 ? segment.substring(0, semi) : segment;
     }
 
     private Claims parseClaims(String token) {

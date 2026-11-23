@@ -33,6 +33,8 @@ public interface OrderService {
 
     void pay(String orderId, long userId);
 
+    SeckillOrder applyCoupon(String orderId, long userId, Long userCouponId);
+
     void cancel(String orderId, long userId, boolean isAdmin);
 
     /** 系统定时关单（无 HTTP 用户上下文，包含库存归还） */

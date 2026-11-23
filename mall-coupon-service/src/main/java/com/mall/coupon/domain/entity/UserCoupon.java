@@ -21,7 +21,10 @@ public class UserCoupon {
     /** 1=满减 2=折扣 */
     private Integer type;
     private BigDecimal discountValue;
+    private BigDecimal maxDiscountAmount;
     private BigDecimal threshold;
+    private Integer target;
+    private String productCode;
     /** 0=未使用 1=已使用 2=已过期 */
     private Integer status;
     private String orderId;

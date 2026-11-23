@@ -139,6 +139,10 @@ public final class RedisKey {
         return "lock:job:order:timeout";
     }
 
+    public static String couponSettlementSweepJobLock() {
+        return "lock:job:coupon:settlement-sweep";
+    }
+
     /* ===== 常量与 TTL 计算 ===== */
 
     public static final String STATUS_PREHEATED = "0";

@@ -20,8 +20,11 @@ public class CouponTemplate {
     private Integer type;
     /** 满减金额 / 折扣率（0.85 表示 85 折） */
     private BigDecimal discountValue;
+    private BigDecimal maxDiscountAmount;
     /** 使用门槛，0 表示无门槛 */
     private BigDecimal threshold;
+    private Integer target;
+    private String productCode;
     private Integer total;
     private Integer received;
     private Integer perUserLimit;

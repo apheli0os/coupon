@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -36,4 +37,14 @@ public interface SeckillOrderMapper extends BaseMapper<SeckillOrder> {
 
     @Update("UPDATE seckill_order SET stock_restored = 1 WHERE order_id = #{orderId} AND status = 2 AND stock_restored = 0")
     int markStockRestored(@Param("orderId") String orderId);
+
+    @Update("UPDATE seckill_order " +
+            "SET coupon_id = #{couponId}, discount_amount = #{discountAmount}, pay_amount = #{payAmount} " +
+            "WHERE order_id = #{orderId} AND user_id = #{userId} AND status = 0 AND coupon_id IS NULL")
+    int applyCoupon(
+            @Param("orderId") String orderId,
+            @Param("userId") Long userId,
+            @Param("couponId") Long couponId,
+            @Param("discountAmount") BigDecimal discountAmount,
+            @Param("payAmount") BigDecimal payAmount);
 }

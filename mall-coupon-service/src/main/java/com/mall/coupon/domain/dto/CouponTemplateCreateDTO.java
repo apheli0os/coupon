@@ -27,8 +27,17 @@ public class CouponTemplateCreateDTO {
     @DecimalMin(value = "0.01", message = "优惠值必须大于 0")
     private BigDecimal discountValue;
 
+    @DecimalMin(value = "0.01", message = "封顶金额必须大于 0")
+    private BigDecimal maxDiscountAmount;
+
     @DecimalMin(value = "0", message = "使用门槛不能为负")
     private BigDecimal threshold = BigDecimal.ZERO;
+
+    @Min(value = 0, message = "适用范围必须为 0(全场) 或 1(指定商品)")
+    @Max(value = 1, message = "适用范围必须为 0(全场) 或 1(指定商品)")
+    private Integer target = 0;
+
+    private String productCode;
 
     @NotNull(message = "发行总量不能为空")
     @Min(value = 1, message = "发行总量至少为 1")

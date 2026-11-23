@@ -156,6 +156,22 @@ class LuaScriptsRedisIT {
         assertEquals(1L, compRetry[0]);
         assertEquals(2L, compRetry[1]);
         assertEquals("2", redisTemplate.opsForValue().get(stockKey));
+
+        long[] incrPresent = luaExecutor.parse(luaExecutor.execute(
+                LuaScriptExecutor.SCRIPT_COUPON_STOCK_INCR_IF_PRESENT,
+                List.of(stockKey),
+                5));
+        assertEquals(1L, incrPresent[0]);
+        assertEquals(7L, incrPresent[1]);
+        assertEquals("7", redisTemplate.opsForValue().get(stockKey));
+
+        String absentStockKey = RedisKey.couponStock(9999L);
+        long[] incrAbsent = luaExecutor.parse(luaExecutor.execute(
+                LuaScriptExecutor.SCRIPT_COUPON_STOCK_INCR_IF_PRESENT,
+                List.of(absentStockKey),
+                5));
+        assertEquals(0L, incrAbsent[0]);
+        assertNull(redisTemplate.opsForValue().get(absentStockKey));
     }
 
     @Test

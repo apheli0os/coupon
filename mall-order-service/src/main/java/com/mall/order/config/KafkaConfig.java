@@ -59,6 +59,14 @@ public class KafkaConfig {
                 .build();
     }
 
+    @Bean
+    public NewTopic orderPaidTopic() {
+        return TopicBuilder.name(CommonConstant.MQ_TOPIC_ORDER_PAID)
+                .partitions(partitions)
+                .replicas(replicas)
+                .build();
+    }
+
     /**
      * 5 次重试后转入 seckill-topic.DLQ，由 DLQ 监听器告警，避免坏消息阻塞分区。
      * 用 Spring Boot 的 Configurer 保留自动配置的 ack-mode/deserializer 等属性。

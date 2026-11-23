@@ -10,14 +10,19 @@ import com.mall.common.constants.RedisKey;
 import com.mall.common.context.UserContext;
 import com.mall.common.exception.BizException;
 import com.mall.common.message.CouponClaimMessage;
-import com.mall.common.message.OrderQueryResult;
 import com.mall.common.metrics.BusinessMetrics;
+import com.mall.common.pricing.CouponPricing;
+import com.mall.common.pricing.CouponPricingResult;
+import com.mall.common.pricing.CouponPricingRule;
 import com.mall.common.util.IdGenerator;
 import com.mall.common.util.LuaScriptExecutor;
+import com.mall.coupon.domain.dto.CouponQuoteRequestDTO;
+import com.mall.coupon.domain.dto.CouponQuoteResponseDTO;
 import com.mall.coupon.domain.dto.CouponUseDTO;
 import com.mall.coupon.domain.entity.CouponTemplate;
 import com.mall.coupon.domain.entity.UserCoupon;
 import com.mall.coupon.domain.enums.CouponEnums;
+import com.mall.coupon.domain.vo.CouponQuoteItemVO;
 import com.mall.coupon.feign.OrderFeignClient;
 import com.mall.coupon.mapper.UserCouponMapper;
 import com.mall.coupon.service.CouponService;
@@ -32,6 +37,8 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -96,7 +103,10 @@ public class CouponServiceImpl implements CouponService {
         message.setCouponName(template.getName());
         message.setType(template.getType());
         message.setDiscountValue(template.getDiscountValue());
+        message.setMaxDiscountAmount(template.getMaxDiscountAmount());
         message.setThreshold(template.getThreshold());
+        message.setTarget(template.getTarget() == null ? Integer.valueOf(CouponEnums.TARGET_ALL) : template.getTarget());
+        message.setProductCode(template.getProductCode());
         message.setStatus(CouponEnums.COUPON_UNUSED);
         message.setCreateTime(now);
         message.setUpdateTime(now);
@@ -179,77 +189,88 @@ public class CouponServiceImpl implements CouponService {
     }
 
     @Override
-    public void useCoupon(CouponUseDTO dto) {
+    public CouponQuoteResponseDTO quoteCoupons(CouponQuoteRequestDTO dto) {
         long userId = UserContext.getRequired();
-        UserCoupon coupon = userCouponMapper.selectById(dto.getUserCouponId());
-        if (coupon == null) {
-            throw new BizException(ResultCode.NOT_FOUND);
+        if (dto == null || dto.getOrderAmount() == null || dto.getOrderAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BizException(ResultCode.PARAM_ERROR, "订单金额必须大于 0");
         }
-        if (!coupon.getUserId().equals(userId)) {
-            throw new BizException(ResultCode.COUPON_NOT_OWNED);
+        LocalDateTime now = LocalDateTime.now();
+        List<UserCoupon> coupons = userCouponMapper.selectList(new LambdaQueryWrapper<UserCoupon>()
+                .eq(UserCoupon::getUserId, userId)
+                .eq(UserCoupon::getStatus, CouponEnums.COUPON_UNUSED)
+                .gt(UserCoupon::getExpireTime, now)
+                .orderByAsc(UserCoupon::getExpireTime));
+        List<CouponQuoteItemVO> available = new ArrayList<>();
+        List<CouponQuoteItemVO> unavailable = new ArrayList<>();
+        if (coupons != null) {
+            for (UserCoupon coupon : coupons) {
+                evaluateCouponQuote(coupon, dto, available, unavailable);
+            }
         }
-        if (coupon.getStatus() != CouponEnums.COUPON_UNUSED) {
-            throw new BizException(ResultCode.COUPON_ALREADY_USED);
-        }
-        if (coupon.getExpireTime() != null && coupon.getExpireTime().isBefore(LocalDateTime.now())) {
-            throw new BizException(ResultCode.COUPON_EXPIRED);
-        }
-        // 强制调用订单服务校验：存在性、归属人、待支付状态及服务端真实金额（fail-closed，不信任客户端传参）
-        R<OrderQueryResult> orderResp;
-        try {
-            orderResp = orderFeignClient.getOrder(dto.getOrderId());
-        } catch (Exception e) {
-            log.error("核销校验订单失败 orderId={} cause={}", dto.getOrderId(), e.getMessage());
-            throw new BizException(ResultCode.SYSTEM_ERROR, "订单服务暂不可用，请稍后重试");
-        }
-        if (orderResp == null || !orderResp.isSuccess()) {
-            throw new BizException(ResultCode.SYSTEM_ERROR, "订单服务暂不可用，请稍后重试");
-        }
-        OrderQueryResult order = orderResp.getData();
-        if (order == null) {
-            throw new BizException(ResultCode.ORDER_NOT_FOUND);
-        }
-        if (order.getUserId() == null || !order.getUserId().equals(userId)) {
-            throw new BizException(ResultCode.FORBIDDEN, "订单不属于当前用户");
-        }
-        if (!Integer.valueOf(0).equals(order.getStatus())) {
-            throw new BizException(ResultCode.ORDER_STATUS_INVALID, "仅待支付订单可使用优惠券");
-        }
-        BigDecimal realOrderAmount = order.getTotalAmount() == null ? BigDecimal.ZERO : order.getTotalAmount();
-        BigDecimal threshold = coupon.getThreshold() == null ? BigDecimal.ZERO : coupon.getThreshold();
-        if (realOrderAmount.compareTo(threshold) < 0) {
-            throw new BizException(ResultCode.COUPON_THRESHOLD_NOT_MET);
-        }
-
-        int rows = userCouponMapper.useCoupon(dto.getUserCouponId(), userId, dto.getOrderId());
-        if (rows == 0) {
-            throw new BizException(ResultCode.COUPON_ALREADY_USED);
-        }
-        recheckOrderUnpaidOrRelease(dto, userId);
-        log.info("优惠券核销成功 userId={} couponId={} orderId={}", userId, dto.getUserCouponId(), dto.getOrderId());
+        Comparator<LocalDateTime> expireOrder = Comparator.nullsLast(Comparator.naturalOrder());
+        available.sort(Comparator.comparing(CouponQuoteItemVO::getDiscountAmount).reversed()
+                .thenComparing(CouponQuoteItemVO::getExpireTime, expireOrder)
+                .thenComparing(CouponQuoteItemVO::getUserCouponId));
+        unavailable.sort(Comparator.comparing(CouponQuoteItemVO::getExpireTime, expireOrder)
+                .thenComparing(CouponQuoteItemVO::getUserCouponId));
+        return new CouponQuoteResponseDTO(available, unavailable);
     }
 
-    private void recheckOrderUnpaidOrRelease(CouponUseDTO dto, long userId) {
-        R<OrderQueryResult> recheckResp;
+    private void evaluateCouponQuote(
+            UserCoupon coupon,
+            CouponQuoteRequestDTO dto,
+            List<CouponQuoteItemVO> available,
+            List<CouponQuoteItemVO> unavailable) {
+        int target = coupon.getTarget() == null ? CouponEnums.TARGET_ALL : coupon.getTarget();
+        CouponPricingRule rule = new CouponPricingRule(
+                coupon.getType() == null ? 0 : coupon.getType(),
+                coupon.getDiscountValue(),
+                coupon.getMaxDiscountAmount(),
+                coupon.getThreshold(),
+                target,
+                coupon.getProductCode());
+        CouponQuoteItemVO.CouponQuoteItemVOBuilder item = CouponQuoteItemVO.builder()
+                .userCouponId(coupon.getId())
+                .templateId(coupon.getTemplateId())
+                .couponName(coupon.getCouponName())
+                .type(coupon.getType())
+                .discountValue(coupon.getDiscountValue())
+                .maxDiscountAmount(coupon.getMaxDiscountAmount())
+                .threshold(coupon.getThreshold())
+                .target(target)
+                .productCode(coupon.getProductCode())
+                .expireTime(coupon.getExpireTime());
         try {
-            recheckResp = orderFeignClient.getOrder(dto.getOrderId());
+            CouponPricingResult priced = CouponPricing.calculate(rule, dto.getOrderAmount(), dto.getProductCode());
+            available.add(item
+                    .discountAmount(priced.discountAmount())
+                    .payAmount(priced.payAmount())
+                    .available(true)
+                    .build());
+        } catch (BizException ex) {
+            unavailable.add(item
+                    .available(false)
+                    .unavailableReason(ex.getMessage())
+                    .build());
+        }
+    }
+
+    @Override
+    public void useCoupon(CouponUseDTO dto) {
+        long userId = UserContext.getRequired();
+        R<Void> response;
+        try {
+            response = orderFeignClient.applyCoupon(dto.getOrderId(), userId, dto.getUserCouponId());
         } catch (Exception e) {
-            userCouponMapper.releaseCoupon(dto.getUserCouponId(), userId, dto.getOrderId());
-            log.warn("核销后复核订单异常，已释放优惠券 userId={} couponId={} orderId={} cause={}",
-                    userId, dto.getUserCouponId(), dto.getOrderId(), e.getMessage());
-            throw new BizException(ResultCode.SYSTEM_ERROR, "订单状态复核失败，优惠券已退回");
+            log.error("转发订单绑券失败 orderId={} userId={} couponId={} cause={}",
+                    dto.getOrderId(), userId, dto.getUserCouponId(), e.getMessage());
+            throw new BizException(ResultCode.SYSTEM_ERROR, "订单服务暂不可用，请稍后重试");
         }
-        if (recheckResp == null || !recheckResp.isSuccess()) {
-            userCouponMapper.releaseCoupon(dto.getUserCouponId(), userId, dto.getOrderId());
-            throw new BizException(ResultCode.SYSTEM_ERROR, "订单状态复核失败，优惠券已退回");
+        if (response == null) {
+            throw new BizException(ResultCode.SYSTEM_ERROR, "订单服务暂不可用，请稍后重试");
         }
-        OrderQueryResult latestOrder = recheckResp.getData();
-        if (latestOrder == null || !Integer.valueOf(0).equals(latestOrder.getStatus())) {
-            userCouponMapper.releaseCoupon(dto.getUserCouponId(), userId, dto.getOrderId());
-            log.warn("核销窗口内订单状态已变更，已回滚优惠券 userId={} couponId={} orderId={} latestStatus={}",
-                    userId, dto.getUserCouponId(), dto.getOrderId(),
-                    latestOrder == null ? null : latestOrder.getStatus());
-            throw new BizException(ResultCode.ORDER_STATUS_INVALID, "订单状态已变更，仅待支付订单可使用优惠券");
+        if (!response.isSuccess()) {
+            throw new BizException(response.getCode(), response.getMessage());
         }
     }
 

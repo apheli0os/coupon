@@ -1,9 +1,13 @@
 package com.mall.coupon;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mall.coupon.consumer.CouponClaimConsumer;
 import com.mall.coupon.consumer.OrderCancelCouponRefundConsumer;
+import com.mall.coupon.domain.entity.CouponSettlement;
+import com.mall.coupon.domain.entity.CouponTemplate;
 import com.mall.coupon.domain.entity.UserCoupon;
 import com.mall.coupon.domain.enums.CouponEnums;
+import com.mall.coupon.mapper.CouponSettlementMapper;
 import com.mall.coupon.mapper.CouponTemplateMapper;
 import com.mall.coupon.mapper.UserCouponMapper;
 import org.junit.jupiter.api.Test;
@@ -84,6 +88,9 @@ class CouponServiceIntegrationIT {
     private CouponTemplateMapper templateMapper;
 
     @Autowired
+    private CouponSettlementMapper settlementMapper;
+
+    @Autowired
     private CouponClaimConsumer claimConsumer;
 
     @Autowired
@@ -103,6 +110,7 @@ class CouponServiceIntegrationIT {
         active.setType(CouponEnums.TYPE_FIXED);
         active.setDiscountValue(new BigDecimal("20.00"));
         active.setThreshold(new BigDecimal("100.00"));
+        active.setTarget(CouponEnums.TARGET_ALL);
         active.setStatus(CouponEnums.COUPON_UNUSED);
         active.setExpireTime(now.plusDays(3));
         active.setCreateTime(now);
@@ -113,16 +121,34 @@ class CouponServiceIntegrationIT {
         assertEquals(1L, userCouponMapper.countByTemplate(1001L));
         assertEquals(1, userCouponMapper.countGroupedByUser(1001L).size());
 
-        assertEquals(1, userCouponMapper.useCoupon(90001L, 10001L, "ORD-IT-1"));
-        assertEquals(1, userCouponMapper.refundByOrderId("ORD-IT-1"));
+        assertEquals(1, userCouponMapper.lockCoupon(90001L, 10001L, "ORD-IT-LOCK"));
+        assertEquals(CouponEnums.COUPON_LOCKED, userCouponMapper.selectById(90001L).getStatus());
 
-        UserCoupon refunded = userCouponMapper.selectById(90001L);
-        assertEquals(CouponEnums.COUPON_UNUSED, refunded.getStatus());
-        assertNull(refunded.getOrderId());
-
-        assertEquals(1, userCouponMapper.useCoupon(90001L, 10001L, "ORD-IT-2"));
-        assertEquals(1, userCouponMapper.releaseCoupon(90001L, 10001L, "ORD-IT-2"));
+        CouponSettlement settlement = new CouponSettlement();
+        settlement.setId(91001L);
+        settlement.setUserId(10001L);
+        settlement.setOrderId("ORD-IT-LOCK");
+        settlement.setUserCouponId(90001L);
+        settlement.setTemplateId(1001L);
+        settlement.setStatus(CouponEnums.SETTLEMENT_LOCKED);
+        settlement.setOrderAmount(new BigDecimal("200.00"));
+        settlement.setDiscountAmount(new BigDecimal("20.00"));
+        settlement.setPayAmount(new BigDecimal("180.00"));
+        settlement.setLockTime(now);
+        settlement.setCreateTime(now);
+        settlement.setUpdateTime(now);
+        assertEquals(1, settlementMapper.insert(settlement));
+        assertEquals(1, settlementMapper.selectLockedByOrderAndUser(10001L, "ORD-IT-LOCK").size());
+        assertEquals(1, settlementMapper.advanceToCancelled(91001L, 10001L));
+        assertEquals(1, userCouponMapper.unlockLockedCoupon(90001L, 10001L, "ORD-IT-LOCK"));
         assertEquals(CouponEnums.COUPON_UNUSED, userCouponMapper.selectById(90001L).getStatus());
+
+        assertEquals(1, userCouponMapper.lockCoupon(90001L, 10001L, "ORD-IT-SET"));
+        assertEquals(1, userCouponMapper.settleLockedCoupon(90001L, 10001L, "ORD-IT-SET"));
+        assertEquals(CouponEnums.COUPON_USED, userCouponMapper.selectById(90001L).getStatus());
+        assertEquals(1, userCouponMapper.refundByOrderAndUser(10001L, "ORD-IT-SET"));
+        assertEquals(CouponEnums.COUPON_UNUSED, userCouponMapper.selectById(90001L).getStatus());
+        assertNull(userCouponMapper.selectById(90001L).getOrderId());
 
         UserCoupon usedExpired = new UserCoupon();
         usedExpired.setId(90002L);
@@ -132,6 +158,7 @@ class CouponServiceIntegrationIT {
         usedExpired.setType(CouponEnums.TYPE_FIXED);
         usedExpired.setDiscountValue(new BigDecimal("20.00"));
         usedExpired.setThreshold(new BigDecimal("100.00"));
+        usedExpired.setTarget(CouponEnums.TARGET_ALL);
         usedExpired.setStatus(CouponEnums.COUPON_USED);
         usedExpired.setOrderId("ORD-IT-EXP");
         usedExpired.setExpireTime(now.minusDays(2));
@@ -143,6 +170,34 @@ class CouponServiceIntegrationIT {
         UserCoupon refundedExpired = userCouponMapper.selectById(90002L);
         assertEquals(CouponEnums.COUPON_EXPIRED, refundedExpired.getStatus());
         assertNull(refundedExpired.getOrderId());
+
+        UserCoupon lockedExpired = new UserCoupon();
+        lockedExpired.setId(90003L);
+        lockedExpired.setUserId(10003L);
+        lockedExpired.setTemplateId(1001L);
+        lockedExpired.setCouponName("LockedExpired");
+        lockedExpired.setType(CouponEnums.TYPE_FIXED);
+        lockedExpired.setDiscountValue(new BigDecimal("20.00"));
+        lockedExpired.setThreshold(new BigDecimal("100.00"));
+        lockedExpired.setTarget(CouponEnums.TARGET_ALL);
+        lockedExpired.setStatus(CouponEnums.COUPON_LOCKED);
+        lockedExpired.setOrderId("ORD-IT-LOCK-EXP");
+        lockedExpired.setExpireTime(now.minusDays(1));
+        lockedExpired.setCreateTime(now.minusDays(2));
+        lockedExpired.setUpdateTime(now);
+        assertEquals(1, userCouponMapper.insert(lockedExpired));
+        assertEquals(1, userCouponMapper.unlockLockedCoupon(90003L, 10003L, "ORD-IT-LOCK-EXP"));
+        assertEquals(CouponEnums.COUPON_EXPIRED, userCouponMapper.selectById(90003L).getStatus());
+        assertNull(userCouponMapper.selectById(90003L).getOrderId());
+
+        Page<CouponTemplate> page = templateMapper.selectPage(new Page<>(1, 1), null);
+        assertEquals(2L, page.getTotal());
+        assertEquals(1, page.getRecords().size());
+
+        assertEquals(1, templateMapper.increaseTotal(1001L, 50));
+        assertEquals(1050, templateMapper.selectById(1001L).getTotal());
+        assertEquals(1, templateMapper.terminate(1001L));
+        assertEquals(0, templateMapper.increaseTotal(1001L, 10));
 
         assertEquals(1, templateMapper.incrReceivedBy(1002L, 500));
         assertEquals(0, templateMapper.incrReceivedBy(1002L, 1));

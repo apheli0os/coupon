@@ -97,6 +97,18 @@ class OrderServiceIntegrationIT {
         SeckillOrder created1 = orderMapper.selectById("ORD-IT-1");
         assertNotNull(created1);
         assertEquals(0, created1.getStatus());
+        assertEquals("SKU-2026-001", created1.getProductCode());
+        assertEquals(0, BigDecimal.ZERO.compareTo(created1.getDiscountAmount()));
+        assertEquals(0, new BigDecimal("5999.00").compareTo(created1.getPayAmount()));
+
+        assertEquals(1, orderMapper.applyCoupon(
+                "ORD-IT-1", userId, 777L, new BigDecimal("200.00"), new BigDecimal("5799.00")));
+        assertEquals(0, orderMapper.applyCoupon(
+                "ORD-IT-1", userId, 888L, new BigDecimal("100.00"), new BigDecimal("5899.00")));
+        SeckillOrder discounted1 = orderMapper.selectById("ORD-IT-1");
+        assertEquals(777L, discounted1.getCouponId());
+        assertEquals(0, new BigDecimal("200.00").compareTo(discounted1.getDiscountAmount()));
+        assertEquals(0, new BigDecimal("5799.00").compareTo(discounted1.getPayAmount()));
 
         orderService.cancel("ORD-IT-1", userId, false);
         SeckillOrder cancelled1 = orderMapper.selectById("ORD-IT-1");
@@ -118,6 +130,7 @@ class OrderServiceIntegrationIT {
         m.setOrderId(orderId);
         m.setActivityId(activityId);
         m.setUserId(userId);
+        m.setProductCode("SKU-2026-001");
         m.setProductName("Phone");
         m.setSeckillPrice(new BigDecimal("5999.00"));
         m.setQuantity(1);

@@ -57,7 +57,11 @@ class CouponClaimConsumerTest {
         CouponClaimConsumer consumer = new CouponClaimConsumer(userCouponMapper, templateMapper, luaExecutor, redis);
         consumer.onMessage(List.of(valid, rolledBack));
 
-        verify(userCouponMapper).batchInsertIgnore(argThat(list -> list.size() == 1 && list.get(0).getId().equals(1L)));
+        verify(userCouponMapper).batchInsertIgnore(argThat(list -> list.size() == 1
+                && list.get(0).getId().equals(1L)
+                && new BigDecimal("50.00").compareTo(list.get(0).getMaxDiscountAmount()) == 0
+                && Integer.valueOf(1).equals(list.get(0).getTarget())
+                && "SKU-1".equals(list.get(0).getProductCode())));
         verify(templateMapper).incrReceivedBy(100L, 1);
     }
 
@@ -151,7 +155,10 @@ class CouponClaimConsumerTest {
         m.setCouponName("券");
         m.setType(1);
         m.setDiscountValue(BigDecimal.TEN);
+        m.setMaxDiscountAmount(new BigDecimal("50.00"));
         m.setThreshold(BigDecimal.ZERO);
+        m.setTarget(1);
+        m.setProductCode("SKU-1");
         m.setStatus(0);
         m.setExpireTime(LocalDateTime.now().plusDays(1));
         m.setCreateTime(LocalDateTime.now());

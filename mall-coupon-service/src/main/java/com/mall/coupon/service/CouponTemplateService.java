@@ -1,6 +1,8 @@
 package com.mall.coupon.service;
 
+import com.mall.common.PageResult;
 import com.mall.coupon.domain.dto.CouponTemplateCreateDTO;
+import com.mall.coupon.domain.dto.CouponTemplatePageQueryDTO;
 import com.mall.coupon.domain.entity.CouponTemplate;
 
 import java.util.List;
@@ -16,4 +18,10 @@ public interface CouponTemplateService {
     CouponTemplate getDetail(Long templateId);
 
     List<CouponTemplate> listAll();
+
+    void increaseStock(Long templateId, int delta);
+
+    void terminate(Long templateId);
+
+    PageResult<CouponTemplate> pageQuery(CouponTemplatePageQueryDTO query);
 }

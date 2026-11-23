@@ -30,6 +30,13 @@ public class OrderFeignClientFallbackFactory implements FallbackFactory<OrderFei
                 log.error("订单服务 getOrder 调用失败，拒绝放行 orderId={} cause={}", orderId, cause.getMessage());
                 return R.fail(ResultCode.SYSTEM_ERROR);
             }
+
+            @Override
+            public R<Void> applyCoupon(String orderId, Long userId, Long userCouponId) {
+                log.error("订单服务 applyCoupon 调用失败，拒绝放行 orderId={} userId={} couponId={} cause={}",
+                        orderId, userId, userCouponId, cause.getMessage());
+                return R.fail(ResultCode.SYSTEM_ERROR);
+            }
         };
     }
 }

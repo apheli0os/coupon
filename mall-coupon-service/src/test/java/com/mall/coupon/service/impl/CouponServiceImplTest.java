@@ -1,14 +1,18 @@
 package com.mall.coupon.service.impl;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mall.common.R;
 import com.mall.common.ResultCode;
 import com.mall.common.constants.RedisKey;
 import com.mall.common.context.UserContext;
 import com.mall.common.exception.BizException;
-import com.mall.common.message.OrderQueryResult;
+import com.mall.common.message.CouponClaimMessage;
 import com.mall.common.metrics.BusinessMetrics;
 import com.mall.common.util.IdGenerator;
 import com.mall.common.util.LuaScriptExecutor;
+import com.mall.coupon.domain.dto.CouponQuoteRequestDTO;
+import com.mall.coupon.domain.dto.CouponQuoteResponseDTO;
 import com.mall.coupon.domain.dto.CouponUseDTO;
 import com.mall.coupon.domain.entity.CouponTemplate;
 import com.mall.coupon.domain.entity.UserCoupon;
@@ -16,12 +20,17 @@ import com.mall.coupon.domain.enums.CouponEnums;
 import com.mall.coupon.feign.OrderFeignClient;
 import com.mall.coupon.mapper.UserCouponMapper;
 import com.mall.coupon.service.CouponTemplateService;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.SendResult;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -29,13 +38,14 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -55,6 +65,8 @@ class CouponServiceImplTest {
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
+        TableInfoHelper.initTableInfo(
+                new MapperBuilderAssistant(new MybatisConfiguration(), ""), UserCoupon.class);
         templateService = mock(CouponTemplateService.class);
         userCouponMapper = mock(UserCouponMapper.class);
         luaExecutor = mock(LuaScriptExecutor.class);
@@ -77,61 +89,31 @@ class CouponServiceImplTest {
     }
 
     @Test
-    void useCoupon_shouldVerifyRealServerOrderAmountAndRejectThresholdViolation() {
-        UserCoupon coupon = sampleCoupon(10L, 1001L, new BigDecimal("100.00"));
-        when(userCouponMapper.selectById(10L)).thenReturn(coupon);
+    void claim_shouldPropagateMaxDiscountCapAndProductScopeInMessage() {
+        CouponTemplate tpl = activeTemplate(101L);
+        tpl.setType(CouponEnums.TYPE_DISCOUNT);
+        tpl.setDiscountValue(new BigDecimal("0.85"));
+        tpl.setMaxDiscountAmount(new BigDecimal("200.00"));
+        tpl.setTarget(CouponEnums.TARGET_PRODUCT);
+        tpl.setProductCode("SKU-2026-001");
+        when(templateService.getDetail(101L)).thenReturn(tpl);
+        when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_COUPON_CLAIM), anyList(), any(), any()))
+                .thenReturn(List.of(0L, 19L));
+        when(luaExecutor.parse(List.of(0L, 19L))).thenReturn(new long[]{0L, 19L});
+        when(idGenerator.nextId()).thenReturn(9001L);
+        SendResult<String, Object> sendResult = new SendResult<>(
+                null,
+                new RecordMetadata(new TopicPartition("coupon-claim-topic", 0), 0, 0, 0, 0, 0));
+        when(kafkaTemplate.send(anyString(), eq("9001"), any()))
+                .thenReturn(CompletableFuture.completedFuture(sendResult));
 
-        OrderQueryResult order = new OrderQueryResult();
-        order.setOrderId("ORD-1");
-        order.setUserId(1001L);
-        order.setStatus(0);
-        // 服务端真实订单金额仅 50，客户端伪造 999 试图绕过 100 门槛
-        order.setTotalAmount(new BigDecimal("50.00"));
-        when(orderFeignClient.getOrder("ORD-1")).thenReturn(R.ok(order));
+        couponService.claim(101L);
 
-        CouponUseDTO dto = new CouponUseDTO();
-        dto.setUserCouponId(10L);
-        dto.setOrderId("ORD-1");
-        dto.setOrderAmount(new BigDecimal("999.00"));
-
-        BizException ex = assertThrows(BizException.class, () -> couponService.useCoupon(dto));
-        assertEquals(ResultCode.COUPON_THRESHOLD_NOT_MET.getCode(), ex.getCode());
-        verify(userCouponMapper, never()).useCoupon(any(), any(), any());
-    }
-
-    @Test
-    void useCoupon_shouldRejectOtherUsersOrder() {
-        UserCoupon coupon = sampleCoupon(11L, 1001L, BigDecimal.ZERO);
-        when(userCouponMapper.selectById(11L)).thenReturn(coupon);
-
-        OrderQueryResult order = new OrderQueryResult();
-        order.setOrderId("ORD-2");
-        order.setUserId(2002L);
-        order.setStatus(0);
-        order.setTotalAmount(new BigDecimal("200.00"));
-        when(orderFeignClient.getOrder("ORD-2")).thenReturn(R.ok(order));
-
-        CouponUseDTO dto = new CouponUseDTO();
-        dto.setUserCouponId(11L);
-        dto.setOrderId("ORD-2");
-
-        BizException ex = assertThrows(BizException.class, () -> couponService.useCoupon(dto));
-        assertEquals(ResultCode.FORBIDDEN.getCode(), ex.getCode());
-    }
-
-    @Test
-    void useCoupon_shouldFailClosedWhenOrderServiceUnavailable() {
-        UserCoupon coupon = sampleCoupon(12L, 1001L, BigDecimal.ZERO);
-        when(userCouponMapper.selectById(12L)).thenReturn(coupon);
-        when(orderFeignClient.getOrder("ORD-3")).thenReturn(R.fail(ResultCode.SYSTEM_ERROR));
-
-        CouponUseDTO dto = new CouponUseDTO();
-        dto.setUserCouponId(12L);
-        dto.setOrderId("ORD-3");
-
-        BizException ex = assertThrows(BizException.class, () -> couponService.useCoupon(dto));
-        assertEquals(ResultCode.SYSTEM_ERROR.getCode(), ex.getCode());
-        verify(userCouponMapper, never()).useCoupon(any(), any(), any());
+        ArgumentCaptor<CouponClaimMessage> msgCaptor = ArgumentCaptor.forClass(CouponClaimMessage.class);
+        verify(kafkaTemplate).send(anyString(), eq("9001"), msgCaptor.capture());
+        assertEquals(new BigDecimal("200.00"), msgCaptor.getValue().getMaxDiscountAmount());
+        assertEquals(CouponEnums.TARGET_PRODUCT, msgCaptor.getValue().getTarget());
+        assertEquals("SKU-2026-001", msgCaptor.getValue().getProductCode());
     }
 
     @Test
@@ -161,42 +143,93 @@ class CouponServiceImplTest {
     }
 
     @Test
-    void useCoupon_shouldRejectAndReleaseWhenOrderCancelledConcurrentlyAfterInitialCheck() {
-        UserCoupon coupon = sampleCoupon(15L, 1001L, new BigDecimal("50.00"));
-        when(userCouponMapper.selectById(15L)).thenReturn(coupon);
+    void quoteCoupons_shouldSortAvailableByDiscountDescAndExpireAscWithUnavailableReasons() {
+        LocalDateTime now = LocalDateTime.now();
+        UserCoupon fixedEarlier = fixedCoupon(1L, new BigDecimal("20.00"), new BigDecimal("100.00"), now.plusDays(1));
+        UserCoupon fixedLater = fixedCoupon(2L, new BigDecimal("20.00"), new BigDecimal("100.00"), now.plusDays(5));
+        UserCoupon cappedDiscount = new UserCoupon();
+        cappedDiscount.setId(3L);
+        cappedDiscount.setUserId(1001L);
+        cappedDiscount.setTemplateId(102L);
+        cappedDiscount.setCouponName("8折封顶150");
+        cappedDiscount.setType(CouponEnums.TYPE_DISCOUNT);
+        cappedDiscount.setDiscountValue(new BigDecimal("0.80"));
+        cappedDiscount.setMaxDiscountAmount(new BigDecimal("150.00"));
+        cappedDiscount.setThreshold(BigDecimal.ZERO);
+        cappedDiscount.setTarget(CouponEnums.TARGET_ALL);
+        cappedDiscount.setStatus(CouponEnums.COUPON_UNUSED);
+        cappedDiscount.setExpireTime(now.plusDays(3));
 
-        OrderQueryResult unpaid = new OrderQueryResult();
-        unpaid.setOrderId("ORD-RACE");
-        unpaid.setUserId(1001L);
-        unpaid.setStatus(0);
-        unpaid.setTotalAmount(new BigDecimal("100.00"));
+        UserCoupon wrongProduct = fixedCoupon(4L, new BigDecimal("50.00"), BigDecimal.ZERO, now.plusDays(2));
+        wrongProduct.setTarget(CouponEnums.TARGET_PRODUCT);
+        wrongProduct.setProductCode("SKU-OTHER");
 
-        OrderQueryResult cancelled = new OrderQueryResult();
-        cancelled.setOrderId("ORD-RACE");
-        cancelled.setUserId(1001L);
-        cancelled.setStatus(2);
-        cancelled.setTotalAmount(new BigDecimal("100.00"));
+        UserCoupon highThreshold = fixedCoupon(5L, new BigDecimal("100.00"), new BigDecimal("5000.00"), now.plusDays(4));
 
-        when(orderFeignClient.getOrder("ORD-RACE")).thenReturn(R.ok(unpaid), R.ok(cancelled));
-        when(userCouponMapper.useCoupon(15L, 1001L, "ORD-RACE")).thenReturn(1);
+        when(userCouponMapper.selectList(any())).thenReturn(
+                List.of(fixedLater, cappedDiscount, fixedEarlier, wrongProduct, highThreshold));
 
-        CouponUseDTO dto = new CouponUseDTO();
-        dto.setUserCouponId(15L);
-        dto.setOrderId("ORD-RACE");
+        CouponQuoteRequestDTO req = new CouponQuoteRequestDTO();
+        req.setOrderAmount(new BigDecimal("1000.00"));
+        req.setProductCode("SKU-2026-001");
 
-        BizException ex = assertThrows(BizException.class, () -> couponService.useCoupon(dto),
-                "订单在核销窗口内被并发取消时，不得放行并让已核销券挂在已取消订单上");
-        assertEquals(ResultCode.ORDER_STATUS_INVALID.getCode(), ex.getCode());
-        verify(userCouponMapper).releaseCoupon(15L, 1001L, "ORD-RACE");
+        CouponQuoteResponseDTO resp = couponService.quoteCoupons(req);
+        assertEquals(3, resp.getAvailableCoupons().size());
+        assertEquals(2, resp.getUnavailableCoupons().size());
+
+        assertEquals(3L, resp.getAvailableCoupons().get(0).getUserCouponId());
+        assertEquals(new BigDecimal("150.00"), resp.getAvailableCoupons().get(0).getDiscountAmount());
+        assertEquals(new BigDecimal("850.00"), resp.getAvailableCoupons().get(0).getPayAmount());
+        assertTrue(resp.getAvailableCoupons().get(0).isAvailable());
+
+        assertEquals(1L, resp.getAvailableCoupons().get(1).getUserCouponId());
+        assertEquals(2L, resp.getAvailableCoupons().get(2).getUserCouponId());
+
+        assertEquals(4L, resp.getUnavailableCoupons().get(0).getUserCouponId());
+        assertFalse(resp.getUnavailableCoupons().get(0).isAvailable());
+        assertEquals(ResultCode.COUPON_PRODUCT_NOT_MATCHED.getMessage(),
+                resp.getUnavailableCoupons().get(0).getUnavailableReason());
     }
 
-    private UserCoupon sampleCoupon(long id, long userId, BigDecimal threshold) {
+    @Test
+    void useCoupon_shouldForwardToOrderApplyCouponAndPropagateErrors() {
+        when(orderFeignClient.applyCoupon("ORD-1", 1001L, 10L)).thenReturn(R.ok());
+
+        CouponUseDTO dto = new CouponUseDTO();
+        dto.setOrderId("ORD-1");
+        dto.setUserCouponId(10L);
+        couponService.useCoupon(dto);
+        verify(orderFeignClient).applyCoupon("ORD-1", 1001L, 10L);
+
+        when(orderFeignClient.applyCoupon("ORD-2", 1001L, 11L))
+                .thenReturn(R.fail(ResultCode.ORDER_COUPON_ALREADY_APPLIED.getCode(), "订单已绑定优惠券"));
+        CouponUseDTO conflictDto = new CouponUseDTO();
+        conflictDto.setOrderId("ORD-2");
+        conflictDto.setUserCouponId(11L);
+        BizException bizEx = assertThrows(BizException.class, () -> couponService.useCoupon(conflictDto));
+        assertEquals(ResultCode.ORDER_COUPON_ALREADY_APPLIED.getCode(), bizEx.getCode());
+
+        when(orderFeignClient.applyCoupon("ORD-3", 1001L, 12L))
+                .thenThrow(new RuntimeException("order service down"));
+        CouponUseDTO downDto = new CouponUseDTO();
+        downDto.setOrderId("ORD-3");
+        downDto.setUserCouponId(12L);
+        BizException downEx = assertThrows(BizException.class, () -> couponService.useCoupon(downDto));
+        assertEquals(ResultCode.SYSTEM_ERROR.getCode(), downEx.getCode());
+    }
+
+    private UserCoupon fixedCoupon(long id, BigDecimal discount, BigDecimal threshold, LocalDateTime expire) {
         UserCoupon c = new UserCoupon();
         c.setId(id);
-        c.setUserId(userId);
-        c.setStatus(CouponEnums.COUPON_UNUSED);
+        c.setUserId(1001L);
+        c.setTemplateId(100L);
+        c.setCouponName("满减券");
+        c.setType(CouponEnums.TYPE_FIXED);
+        c.setDiscountValue(discount);
         c.setThreshold(threshold);
-        c.setExpireTime(LocalDateTime.now().plusDays(1));
+        c.setTarget(CouponEnums.TARGET_ALL);
+        c.setStatus(CouponEnums.COUPON_UNUSED);
+        c.setExpireTime(expire);
         return c;
     }
 
@@ -207,6 +240,7 @@ class CouponServiceImplTest {
         t.setType(CouponEnums.TYPE_FIXED);
         t.setDiscountValue(new BigDecimal("20.00"));
         t.setThreshold(new BigDecimal("100.00"));
+        t.setTarget(CouponEnums.TARGET_ALL);
         t.setPerUserLimit(1);
         t.setValidDays(7);
         t.setStartTime(LocalDateTime.now().minusHours(1));

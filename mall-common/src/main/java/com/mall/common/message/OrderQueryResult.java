@@ -16,6 +16,10 @@ public class OrderQueryResult implements Serializable {
     /** 0=待支付 1=已支付 2=已取消 */
     private Integer status;
     private String statusDesc;
+    private String productCode;
     private String productName;
     private BigDecimal totalAmount;
+    private Long couponId;
+    private BigDecimal discountAmount;
+    private BigDecimal payAmount;
 }

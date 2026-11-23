@@ -1,8 +1,11 @@
 package com.mall.coupon.controller;
 
+import com.mall.common.PageResult;
 import com.mall.common.R;
 import com.mall.common.context.UserContext;
 import com.mall.coupon.domain.dto.CouponTemplateCreateDTO;
+import com.mall.coupon.domain.dto.CouponTemplateIncreaseStockDTO;
+import com.mall.coupon.domain.dto.CouponTemplatePageQueryDTO;
 import com.mall.coupon.domain.entity.CouponTemplate;
 import com.mall.coupon.service.CouponTemplateService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -39,6 +42,27 @@ public class CouponTemplateController {
         UserContext.requireAdmin();
         templateService.publish(id);
         return R.ok();
+    }
+
+    @PostMapping("/{id}/increase-stock")
+    public R<Void> increaseStock(
+            @PathVariable Long id,
+            @Valid @RequestBody CouponTemplateIncreaseStockDTO dto) {
+        UserContext.requireAdmin();
+        templateService.increaseStock(id, dto.getDelta());
+        return R.ok();
+    }
+
+    @PostMapping("/{id}/terminate")
+    public R<Void> terminate(@PathVariable Long id) {
+        UserContext.requireAdmin();
+        templateService.terminate(id);
+        return R.ok();
+    }
+
+    @GetMapping("/page")
+    public R<PageResult<CouponTemplate>> page(CouponTemplatePageQueryDTO query) {
+        return R.ok(templateService.pageQuery(query));
     }
 
     @Operation(summary = "查询模板详情")

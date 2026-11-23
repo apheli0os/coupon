@@ -32,4 +32,12 @@ public class KafkaTopicConfig {
                 .replicas(replicas)
                 .build();
     }
+
+    @Bean
+    public NewTopic orderPaidTopic() {
+        return TopicBuilder.name(CommonConstant.MQ_TOPIC_ORDER_PAID)
+                .partitions(partitions)
+                .replicas(replicas)
+                .build();
+    }
 }

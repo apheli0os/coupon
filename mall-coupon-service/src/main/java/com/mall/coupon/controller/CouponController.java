@@ -1,6 +1,8 @@
 package com.mall.coupon.controller;
 
 import com.mall.common.R;
+import com.mall.coupon.domain.dto.CouponQuoteRequestDTO;
+import com.mall.coupon.domain.dto.CouponQuoteResponseDTO;
 import com.mall.coupon.domain.dto.CouponUseDTO;
 import com.mall.coupon.domain.entity.UserCoupon;
 import com.mall.coupon.service.CouponService;
@@ -37,6 +39,11 @@ public class CouponController {
     @GetMapping("/my")
     public R<List<UserCoupon>> myCoupons(@RequestParam(required = false) Integer status) {
         return R.ok(couponService.listMyCoupons(status));
+    }
+
+    @PostMapping("/quote")
+    public R<CouponQuoteResponseDTO> quote(@Valid @RequestBody CouponQuoteRequestDTO dto) {
+        return R.ok(couponService.quoteCoupons(dto));
     }
 
     @Operation(summary = "核销优惠券")

@@ -8,16 +8,19 @@ VARIABLES
   rollbackGuard,      \* BOOLEAN: coupon:{templateId}:rollback:{userCouponId}
   pendingSend,        \* BOOLEAN: claim() between Lua deduct and Kafka ack/timeout
   mqClaim,            \* BOOLEAN: CouponClaimMessage in Kafka
-  dbCoupon,           \* "none" | "unused" | "used" | "expired"
+  dbCoupon,
   dbReceived,         \* 0..1: coupon_template.received
+  settlement,
+  orderBound,
   orderStatus,        \* "unpaid" | "paid" | "cancelled"
-  feignCheckOk,       \* BOOLEAN: useCoupon() pre-check saw order status=0
-  usePendingRecheck,  \* BOOLEAN: useCoupon() committed DB status=1, awaiting post-use getOrder recheck
+  lockPending,
+  mqOrderPaid,
   mqCancelRefund,     \* BOOLEAN: seckill-cancel-topic event pending for OrderCancelCouponRefundConsumer
   couponExpired       \* BOOLEAN: wall-clock passed coupon.expireTime
 
 vars == <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbCoupon,
-          dbReceived, orderStatus, feignCheckOk, usePendingRecheck, mqCancelRefund, couponExpired>>
+          dbReceived, settlement, orderBound, orderStatus, lockPending, mqOrderPaid,
+          mqCancelRefund, couponExpired>>
 
 Init ==
   /\ stock = 1
@@ -28,9 +31,11 @@ Init ==
   /\ mqClaim = FALSE
   /\ dbCoupon = "none"
   /\ dbReceived = 0
+  /\ settlement = "none"
+  /\ orderBound = FALSE
   /\ orderStatus = "unpaid"
-  /\ feignCheckOk = FALSE
-  /\ usePendingRecheck = FALSE
+  /\ lockPending = FALSE
+  /\ mqOrderPaid = FALSE
   /\ mqCancelRefund = FALSE
   /\ couponExpired = FALSE
 
@@ -45,14 +50,14 @@ ClaimLua ==
   /\ token' = "raw"
   /\ rollbackGuard' = FALSE
   /\ pendingSend' = TRUE
-  /\ UNCHANGED <<mqClaim, dbCoupon, dbReceived, orderStatus, feignCheckOk, usePendingRecheck, mqCancelRefund, couponExpired>>
+  /\ UNCHANGED <<mqClaim, dbCoupon, dbReceived, settlement, orderBound, orderStatus, lockPending, mqOrderPaid, mqCancelRefund, couponExpired>>
 
 \* 2a. Kafka ack
 ClaimKafkaAck ==
   /\ pendingSend
   /\ mqClaim' = TRUE
   /\ pendingSend' = FALSE
-  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, dbCoupon, dbReceived, orderStatus, feignCheckOk, usePendingRecheck, mqCancelRefund, couponExpired>>
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, dbCoupon, dbReceived, settlement, orderBound, orderStatus, lockPending, mqOrderPaid, mqCancelRefund, couponExpired>>
 
 \* 2b. Kafka timeout after broker got message -> coupon_rollback.lua (with rollbackGuard NX)
 ClaimKafkaTimeoutRollback ==
@@ -67,14 +72,14 @@ ClaimKafkaTimeoutRollback ==
                   /\ claimedRedis' = claimedRedis - 1
              ELSE UNCHANGED <<rollbackGuard, stock, claimedRedis>>
      ELSE UNCHANGED <<stock, claimedRedis, token, rollbackGuard>>
-  /\ UNCHANGED <<dbCoupon, dbReceived, orderStatus, feignCheckOk, usePendingRecheck, mqCancelRefund, couponExpired>>
+  /\ UNCHANGED <<dbCoupon, dbReceived, settlement, orderBound, orderStatus, lockPending, mqOrderPaid, mqCancelRefund, couponExpired>>
 
 \* 3. Redis token TTL (30 min) expires while Kafka consumer lags
 TokenTtlExpire ==
   /\ token = "raw"
   /\ ~pendingSend
   /\ token' = "none"
-  /\ UNCHANGED <<stock, claimedRedis, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, orderStatus, feignCheckOk, usePendingRecheck, mqCancelRefund, couponExpired>>
+  /\ UNCHANGED <<stock, claimedRedis, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, settlement, orderBound, orderStatus, lockPending, mqOrderPaid, mqCancelRefund, couponExpired>>
 
 \* 4. CouponClaimConsumer.onMessage (token_claim.lua, or coupon_expire_compensate.lua when token expired & DB none)
 ConsumeClaim ==
@@ -91,7 +96,7 @@ ConsumeClaim ==
           /\ claimedRedis' = claimedRedis - 1
           /\ UNCHANGED <<dbCoupon, dbReceived, token>>
      ELSE UNCHANGED <<stock, claimedRedis, rollbackGuard, dbCoupon, dbReceived, token>>
-  /\ UNCHANGED <<pendingSend, orderStatus, feignCheckOk, usePendingRecheck, mqCancelRefund, couponExpired>>
+  /\ UNCHANGED <<pendingSend, settlement, orderBound, orderStatus, lockPending, mqOrderPaid, mqCancelRefund, couponExpired>>
 
 \* 4b. CouponStockReconcileJob fallback in quiescent window (no active tokens)
 ReconcileStock ==
@@ -101,78 +106,111 @@ ReconcileStock ==
   /\ (stock + dbReceived # 1 \/ claimedRedis # dbReceived)
   /\ stock' = 1 - dbReceived
   /\ claimedRedis' = dbReceived
-  /\ UNCHANGED <<token, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, orderStatus, feignCheckOk, usePendingRecheck, mqCancelRefund, couponExpired>>
+  /\ UNCHANGED <<token, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, settlement, orderBound, orderStatus, lockPending, mqOrderPaid, mqCancelRefund, couponExpired>>
 
-\* 5. CouponServiceImpl.useCoupon Step A: Feign getOrder sees status=0 (unpaid)
-UseCheckOrderUnpaid ==
+LockCoupon ==
   /\ dbCoupon = "unused"
   /\ ~couponExpired
-  /\ ~feignCheckOk
-  /\ ~usePendingRecheck
+  /\ settlement = "none"
   /\ orderStatus = "unpaid"
-  /\ feignCheckOk' = TRUE
-  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, orderStatus, usePendingRecheck, mqCancelRefund, couponExpired>>
+  /\ ~orderBound
+  /\ ~lockPending
+  /\ dbCoupon' = "locked"
+  /\ settlement' = "locked"
+  /\ lockPending' = TRUE
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbReceived, orderBound, orderStatus, mqOrderPaid, mqCancelRefund, couponExpired>>
 
-\* 6a. CouponServiceImpl.useCoupon Step B: userCouponMapper.useCoupon updates DB status=1
-UseCommitCoupon ==
-  /\ feignCheckOk
-  /\ dbCoupon = "unused"
-  /\ ~couponExpired
-  /\ ~usePendingRecheck
-  /\ dbCoupon' = "used"
-  /\ feignCheckOk' = FALSE
-  /\ usePendingRecheck' = TRUE
-  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbReceived, orderStatus, mqCancelRefund, couponExpired>>
+BindOrderSuccess ==
+  /\ lockPending
+  /\ orderStatus = "unpaid"
+  /\ ~orderBound
+  /\ orderBound' = TRUE
+  /\ lockPending' = FALSE
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, settlement, orderStatus, mqOrderPaid, mqCancelRefund, couponExpired>>
 
-\* 6b. CouponServiceImpl.useCoupon Step C: post-use Feign recheck; releaseCoupon if order no longer unpaid
-UseRecheckOrder ==
-  /\ usePendingRecheck
-  /\ usePendingRecheck' = FALSE
-  /\ IF orderStatus = "unpaid"
-     THEN UNCHANGED dbCoupon
-     ELSE IF dbCoupon = "used"
-          THEN dbCoupon' = IF couponExpired THEN "expired" ELSE "unused"
-          ELSE UNCHANGED dbCoupon
-  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbReceived, orderStatus, feignCheckOk, mqCancelRefund, couponExpired>>
+BindOrderFailCompensateUnlock ==
+  /\ lockPending
+  /\ lockPending' = FALSE
+  /\ IF settlement = "locked"
+     THEN /\ settlement' = "cancelled"
+          /\ dbCoupon' = IF couponExpired THEN "expired" ELSE "unused"
+     ELSE UNCHANGED <<settlement, dbCoupon>>
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbReceived, orderBound, orderStatus, mqOrderPaid, mqCancelRefund, couponExpired>>
 
-\* 7. OrderServiceImpl.pay / cancel (cancel publishes seckill-cancel-topic for coupon refund!)
+BindOrderFailCompensationLost ==
+  /\ lockPending
+  /\ lockPending' = FALSE
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, settlement, orderBound, orderStatus, mqOrderPaid, mqCancelRefund, couponExpired>>
+
 PayOrder ==
   /\ orderStatus = "unpaid"
   /\ orderStatus' = "paid"
-  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, feignCheckOk, usePendingRecheck, mqCancelRefund, couponExpired>>
+  /\ mqOrderPaid' = IF orderBound THEN TRUE ELSE mqOrderPaid
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, settlement, orderBound, lockPending, mqCancelRefund, couponExpired>>
+
+ConsumeOrderPaid ==
+  /\ mqOrderPaid
+  /\ mqOrderPaid' = FALSE
+  /\ IF settlement = "locked" /\ dbCoupon = "locked"
+     THEN /\ settlement' = "settled"
+          /\ dbCoupon' = "used"
+     ELSE UNCHANGED <<settlement, dbCoupon>>
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbReceived, orderBound, orderStatus, lockPending, mqCancelRefund, couponExpired>>
+
+DropOrderPaidEvent ==
+  /\ mqOrderPaid
+  /\ mqOrderPaid' = FALSE
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, settlement, orderBound, orderStatus, lockPending, mqCancelRefund, couponExpired>>
 
 CancelOrder ==
   /\ orderStatus = "unpaid"
   /\ orderStatus' = "cancelled"
   /\ mqCancelRefund' = TRUE
-  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, feignCheckOk, usePendingRecheck, couponExpired>>
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, settlement, orderBound, lockPending, mqOrderPaid, couponExpired>>
 
-\* 7b. OrderCancelCouponRefundConsumer.onOrderCancelled: refunds used coupon bound to cancelled order
-CancelRefundCoupon ==
+ConsumeOrderCancelled ==
   /\ mqCancelRefund
   /\ mqCancelRefund' = FALSE
-  /\ IF dbCoupon = "used"
-     THEN dbCoupon' = IF couponExpired THEN "expired" ELSE "unused"
-     ELSE UNCHANGED dbCoupon
-  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbReceived, orderStatus, feignCheckOk, usePendingRecheck, couponExpired>>
+  /\ IF settlement = "locked" /\ dbCoupon = "locked"
+     THEN /\ settlement' = "cancelled"
+          /\ dbCoupon' = IF couponExpired THEN "expired" ELSE "unused"
+     ELSE UNCHANGED <<settlement, dbCoupon>>
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbReceived, orderBound, orderStatus, lockPending, mqOrderPaid, couponExpired>>
 
-\* 8. Coupon expires & CouponExpireJob runs
+DropCancelEvent ==
+  /\ mqCancelRefund
+  /\ mqCancelRefund' = FALSE
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, settlement, orderBound, orderStatus, lockPending, mqOrderPaid, couponExpired>>
+
+SweepExpiredLock ==
+  /\ settlement = "locked"
+  /\ dbCoupon = "locked"
+  /\ orderStatus # "unpaid"
+  /\ IF orderStatus = "paid" /\ orderBound
+     THEN /\ settlement' = "settled"
+          /\ dbCoupon' = "used"
+     ELSE /\ settlement' = "cancelled"
+          /\ dbCoupon' = IF couponExpired THEN "expired" ELSE "unused"
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbReceived, orderBound, orderStatus, lockPending, mqOrderPaid, mqCancelRefund, couponExpired>>
+
 CouponTimePass ==
   /\ ~couponExpired
   /\ couponExpired' = TRUE
-  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, orderStatus, feignCheckOk, usePendingRecheck, mqCancelRefund>>
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbCoupon, dbReceived, settlement, orderBound, orderStatus, lockPending, mqOrderPaid, mqCancelRefund>>
 
 ExpireJob ==
   /\ couponExpired
   /\ dbCoupon = "unused"
   /\ dbCoupon' = "expired"
-  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbReceived, orderStatus, feignCheckOk, usePendingRecheck, mqCancelRefund, couponExpired>>
+  /\ UNCHANGED <<stock, claimedRedis, token, rollbackGuard, pendingSend, mqClaim, dbReceived, settlement, orderBound, orderStatus, lockPending, mqOrderPaid, mqCancelRefund, couponExpired>>
 
 Done ==
   /\ ~pendingSend
   /\ ~mqClaim
-  /\ ~usePendingRecheck
+  /\ ~lockPending
+  /\ ~mqOrderPaid
   /\ ~mqCancelRefund
+  /\ ~(settlement = "locked" /\ orderStatus # "unpaid")
   /\ ~(couponExpired /\ dbCoupon = "unused")
   /\ UNCHANGED vars
 
@@ -183,12 +221,17 @@ Next ==
   \/ TokenTtlExpire
   \/ ConsumeClaim
   \/ ReconcileStock
-  \/ UseCheckOrderUnpaid
-  \/ UseCommitCoupon
-  \/ UseRecheckOrder
+  \/ LockCoupon
+  \/ BindOrderSuccess
+  \/ BindOrderFailCompensateUnlock
+  \/ BindOrderFailCompensationLost
   \/ PayOrder
+  \/ ConsumeOrderPaid
+  \/ DropOrderPaidEvent
   \/ CancelOrder
-  \/ CancelRefundCoupon
+  \/ ConsumeOrderCancelled
+  \/ DropCancelEvent
+  \/ SweepExpiredLock
   \/ CouponTimePass
   \/ ExpireJob
   \/ Done
@@ -199,12 +242,18 @@ Next ==
 CouponStockConserved ==
   (~pendingSend /\ ~mqClaim) => (stock + dbReceived = 1 /\ claimedRedis = dbReceived)
 
-\* 2. Once useCoupon recheck & async cancel-refund settle, a used coupon is NEVER bound to a cancelled order
-UsedCouponNotOnCancelledOrder ==
-  (~mqCancelRefund /\ ~usePendingRecheck) => ((dbCoupon = "used") => (orderStatus # "cancelled"))
+SettlementCouponConsistency ==
+  /\ (settlement = "locked") <=> (dbCoupon = "locked")
+  /\ (settlement = "settled") <=> (dbCoupon = "used")
+  /\ (settlement = "cancelled") => (dbCoupon \in {"unused", "expired"})
 
-\* 3. useCoupon will never finish committed against an order that was already cancelled/paid
-UsedCouponOrderNotPaidBeforeUse ==
-  ~(feignCheckOk /\ orderStatus = "paid" /\ dbCoupon = "unused")
+NoUnlockedCouponWhileBoundUnpaid ==
+  (orderBound /\ orderStatus = "unpaid") => (settlement = "locked" /\ dbCoupon = "locked")
+
+NoUsedCouponOnCancelledOrUnboundOrder ==
+  (dbCoupon = "used" \/ settlement = "settled") => (orderBound /\ orderStatus = "paid")
+
+PaidBoundOrderNeverCancelsSettlement ==
+  (orderStatus = "paid" /\ orderBound) => (settlement # "cancelled")
 
 ====
