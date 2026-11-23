@@ -30,7 +30,7 @@ class OrderServiceIntegrationIT {
     private static final MySQLContainer<?> MYSQL =
             new MySQLContainer<>(DockerImageName.parse("mysql:8.0"))
                     .withDatabaseName("mall_order")
-                    .withTmpFs(Map.of("/var/lib/mysql", "rw,nosuid,size=256m,mode=1777"))
+                    .withTmpFs(Map.of("/var/lib/mysql", "rw,nosuid,size=512m,mode=1777"))
                     .withCommand(
                             "--character-set-server=utf8mb4",
                             "--collation-server=utf8mb4_unicode_ci",
