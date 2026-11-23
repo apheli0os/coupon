@@ -18,6 +18,7 @@ public class SeckillOrderMessage implements Serializable {
     private String orderId;
     private Long userId;
     private Long activityId;
+    private String productCode;
     private String productName;
     private BigDecimal seckillPrice;
     private Integer quantity;

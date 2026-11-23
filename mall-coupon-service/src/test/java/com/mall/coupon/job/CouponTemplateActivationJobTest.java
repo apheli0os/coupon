@@ -25,9 +25,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -47,9 +48,15 @@ class CouponTemplateActivationJobTest {
         MultiLevelCache cache = mock(MultiLevelCache.class);
         RedissonClient redisson = mock(RedissonClient.class);
         RLock lock = mock(RLock.class);
-        when(redisson.getLock(RedisKey.couponActivateJobLock())).thenReturn(lock);
+        when(redisson.getLock(anyString())).thenReturn(lock);
         when(lock.tryLock(anyLong(), any(TimeUnit.class))).thenReturn(true);
         when(lock.isHeldByCurrentThread()).thenReturn(true);
+
+        CouponTemplate preheatedActive = new CouponTemplate();
+        preheatedActive.setId(99L);
+        preheatedActive.setStatus(CouponEnums.TEMPLATE_DRAFT);
+        preheatedActive.setStartTime(LocalDateTime.now().minusMinutes(5));
+        preheatedActive.setEndTime(LocalDateTime.now().plusHours(2));
 
         CouponTemplate preheatedExpired = new CouponTemplate();
         preheatedExpired.setId(100L);
@@ -63,15 +70,20 @@ class CouponTemplateActivationJobTest {
         draftExpired.setStartTime(LocalDateTime.now().minusHours(2));
         draftExpired.setEndTime(LocalDateTime.now().minusMinutes(5));
 
+        when(mapper.selectById(99L)).thenReturn(preheatedActive);
+        when(mapper.selectById(100L)).thenReturn(preheatedExpired);
+        when(mapper.selectById(101L)).thenReturn(draftExpired);
+        when(valueOps.get(RedisKey.couponStatus(99L))).thenReturn(RedisKey.STATUS_PREHEATED);
         when(valueOps.get(RedisKey.couponStatus(100L))).thenReturn(RedisKey.STATUS_PREHEATED);
         when(valueOps.get(RedisKey.couponStatus(101L))).thenReturn(null);
+        when(mapper.updateStatusIfMatch(anyLong(), anyInt(), anyInt(), any())).thenReturn(1);
 
         List<CouponTemplate> expiredRows = List.of(preheatedExpired, draftExpired);
         AtomicInteger queryCount = new AtomicInteger(0);
         when(mapper.selectList(any(LambdaQueryWrapper.class))).thenAnswer(inv -> {
             int call = queryCount.incrementAndGet();
             if (call == 1) {
-                return List.of();
+                return List.of(preheatedActive);
             }
             LambdaQueryWrapper<?> wrapper = inv.getArgument(0);
             wrapper.getSqlSegment();
@@ -86,11 +98,13 @@ class CouponTemplateActivationJobTest {
         CouponTemplateActivationJob job = new CouponTemplateActivationJob(mapper, redis, cache, redisson);
         job.syncTemplateStatus();
 
-        assertEquals(CouponEnums.TEMPLATE_ENDED, preheatedExpired.getStatus(),
-                "已预发布但错过激活窗口的模板到期后必须自动结束为 status=2");
+        verify(mapper).updateStatusIfMatch(
+                eq(99L), eq(CouponEnums.TEMPLATE_DRAFT), eq(CouponEnums.TEMPLATE_ACTIVE), any());
+        verify(valueOps).set(eq(RedisKey.couponStatus(99L)), eq(RedisKey.STATUS_ACTIVE), any(Duration.class));
+        verify(mapper).updateStatusIfMatch(
+                eq(100L), eq(CouponEnums.TEMPLATE_DRAFT), eq(CouponEnums.TEMPLATE_ENDED), any());
         verify(valueOps).set(eq(RedisKey.couponStatus(100L)), eq(RedisKey.STATUS_ENDED), any(Duration.class));
-        assertEquals(CouponEnums.TEMPLATE_DRAFT, draftExpired.getStatus(),
-                "从未发布/预热的草稿模板不得被定时任务误改状态");
+        verify(mapper, never()).updateStatusIfMatch(eq(101L), anyInt(), anyInt(), any());
         verify(valueOps, never()).set(eq(RedisKey.couponStatus(101L)), any(), any(Duration.class));
     }
 }

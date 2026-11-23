@@ -103,6 +103,7 @@ public class SeckillServiceImpl implements SeckillService {
             message.setOrderId(orderId);
             message.setUserId(userId);
             message.setActivityId(activityId);
+            message.setProductCode(activity.getProductCode());
             message.setProductName(activity.getProductName());
             message.setSeckillPrice(activity.getSeckillPrice());
             message.setQuantity(1);

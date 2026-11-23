@@ -54,10 +54,12 @@ class RedisKeyTest {
     void luaScripts_shouldExistAsResources() {
         for (String name : new String[]{
                 "coupon_claim.lua", "coupon_rollback.lua", "coupon_expire_compensate.lua",
+                "coupon_stock_incr_if_present.lua",
                 "seckill.lua", "seckill_rollback.lua", "seckill_expire_compensate.lua",
                 "seckill_cancel_rollback.lua", "seckill_sold_state.lua", "token_claim.lua"}) {
             assertNotNull(getClass().getClassLoader().getResource("lua/" + name), "缺少 Lua 脚本: " + name);
         }
+        assertEquals("lock:job:coupon:settlement-sweep", RedisKey.couponSettlementSweepJobLock());
     }
 
     @Test

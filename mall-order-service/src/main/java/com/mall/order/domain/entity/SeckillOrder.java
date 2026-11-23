@@ -17,10 +17,14 @@ public class SeckillOrder {
     private String orderId;
     private Long userId;
     private Long activityId;
+    private String productCode;
     private String productName;
     private BigDecimal seckillPrice;
     private Integer quantity;
     private BigDecimal totalAmount;
+    private Long couponId;
+    private BigDecimal discountAmount;
+    private BigDecimal payAmount;
     /** 预扣命中的库存桶，超时关单时按桶归还（Kafka 无延迟消息，需落库保存） */
     private Integer stockBucket;
     /** 0=待支付 1=已支付 2=已取消 */

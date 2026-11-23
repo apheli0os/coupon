@@ -23,6 +23,12 @@ public interface UserCouponMapper extends BaseMapper<UserCoupon> {
     @Update("UPDATE user_coupon " +
             "SET status = CASE WHEN expire_time > NOW() THEN 0 ELSE 2 END, " +
             "order_id = NULL, use_time = NULL, update_time = NOW() " +
+            "WHERE user_id = #{userId} AND order_id = #{orderId} AND status = 1")
+    int refundByOrderAndUser(@Param("userId") Long userId, @Param("orderId") String orderId);
+
+    @Update("UPDATE user_coupon " +
+            "SET status = CASE WHEN expire_time > NOW() THEN 0 ELSE 2 END, " +
+            "order_id = NULL, use_time = NULL, update_time = NOW() " +
             "WHERE order_id = #{orderId} AND status = 1")
     int refundByOrderId(@Param("orderId") String orderId);
 
@@ -31,6 +37,23 @@ public interface UserCouponMapper extends BaseMapper<UserCoupon> {
             "order_id = NULL, use_time = NULL, update_time = NOW() " +
             "WHERE id = #{id} AND user_id = #{userId} AND order_id = #{orderId} AND status = 1")
     int releaseCoupon(@Param("id") Long id, @Param("userId") Long userId, @Param("orderId") String orderId);
+
+    @Update("UPDATE user_coupon SET status = 3, order_id = #{orderId}, update_time = NOW() " +
+            "WHERE id = #{id} AND user_id = #{userId} AND status = 0 AND expire_time > NOW()")
+    int lockCoupon(@Param("id") Long id, @Param("userId") Long userId, @Param("orderId") String orderId);
+
+    @Update("UPDATE user_coupon SET status = 1, use_time = NOW(), update_time = NOW() " +
+            "WHERE id = #{id} AND user_id = #{userId} AND order_id = #{orderId} AND status = 3")
+    int settleLockedCoupon(@Param("id") Long id, @Param("userId") Long userId, @Param("orderId") String orderId);
+
+    @Update("UPDATE user_coupon " +
+            "SET status = CASE WHEN expire_time > NOW() THEN 0 ELSE 2 END, " +
+            "order_id = NULL, use_time = NULL, update_time = NOW() " +
+            "WHERE id = #{id} AND user_id = #{userId} AND order_id = #{orderId} AND status = 3")
+    int unlockLockedCoupon(@Param("id") Long id, @Param("userId") Long userId, @Param("orderId") String orderId);
+
+    @Select("SELECT * FROM user_coupon WHERE id = #{id} AND user_id = #{userId}")
+    UserCoupon selectByIdAndUser(@Param("id") Long id, @Param("userId") Long userId);
 
     /** 批量过期任务 */
     @Update("UPDATE user_coupon SET status = 2, update_time = NOW() " +
@@ -54,10 +77,13 @@ public interface UserCouponMapper extends BaseMapper<UserCoupon> {
      */
     @Insert({"<script>",
             "INSERT IGNORE INTO user_coupon (id, user_id, template_id, coupon_name, type, " +
-                    "discount_value, threshold, status, expire_time, create_time, update_time) VALUES ",
+                    "discount_value, max_discount_amount, threshold, target, product_code, " +
+                    "status, expire_time, create_time, update_time) VALUES ",
             "<foreach collection='list' item='e' separator=','>",
             "(#{e.id}, #{e.userId}, #{e.templateId}, #{e.couponName}, #{e.type}, " +
-                    "#{e.discountValue}, #{e.threshold}, #{e.status}, #{e.expireTime}, #{e.createTime}, #{e.updateTime})",
+                    "#{e.discountValue}, #{e.maxDiscountAmount}, #{e.threshold}, " +
+                    "COALESCE(#{e.target}, 0), #{e.productCode}, " +
+                    "#{e.status}, #{e.expireTime}, #{e.createTime}, #{e.updateTime})",
             "</foreach>",
             "</script>"})
     int batchInsertIgnore(@Param("list") List<UserCoupon> list);

@@ -10,6 +10,9 @@ spring:
         server-addr: ${NACOS_ADDR:127.0.0.1:8848}
         namespace: public
         fail-fast: false
+    openfeign:
+      circuitbreaker:
+        enabled: true
   flyway:
     enabled: ${FLYWAY_ENABLED:false}
     locations: classpath:db/migration
@@ -87,3 +90,9 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
+resilience4j:
+  timelimiter:
+    configs:
+      default:
+        timeoutDuration: 3s

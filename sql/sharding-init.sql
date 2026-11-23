@@ -22,12 +22,16 @@ BEGIN
     WHILE i < 4 DO
         SET @s1 = CONCAT('CREATE TABLE IF NOT EXISTS mall_coupon_0.user_coupon_', i, ' LIKE mall_coupon.user_coupon');
         SET @s2 = CONCAT('CREATE TABLE IF NOT EXISTS mall_coupon_1.user_coupon_', i, ' LIKE mall_coupon.user_coupon');
-        SET @s3 = CONCAT('CREATE TABLE IF NOT EXISTS mall_order_0.seckill_order_', i, ' LIKE mall_order.seckill_order');
-        SET @s4 = CONCAT('CREATE TABLE IF NOT EXISTS mall_order_1.seckill_order_', i, ' LIKE mall_order.seckill_order');
+        SET @s3 = CONCAT('CREATE TABLE IF NOT EXISTS mall_coupon_0.coupon_settlement_', i, ' LIKE mall_coupon.coupon_settlement');
+        SET @s4 = CONCAT('CREATE TABLE IF NOT EXISTS mall_coupon_1.coupon_settlement_', i, ' LIKE mall_coupon.coupon_settlement');
+        SET @s5 = CONCAT('CREATE TABLE IF NOT EXISTS mall_order_0.seckill_order_', i, ' LIKE mall_order.seckill_order');
+        SET @s6 = CONCAT('CREATE TABLE IF NOT EXISTS mall_order_1.seckill_order_', i, ' LIKE mall_order.seckill_order');
         PREPARE st1 FROM @s1; EXECUTE st1; DEALLOCATE PREPARE st1;
         PREPARE st2 FROM @s2; EXECUTE st2; DEALLOCATE PREPARE st2;
         PREPARE st3 FROM @s3; EXECUTE st3; DEALLOCATE PREPARE st3;
         PREPARE st4 FROM @s4; EXECUTE st4; DEALLOCATE PREPARE st4;
+        PREPARE st5 FROM @s5; EXECUTE st5; DEALLOCATE PREPARE st5;
+        PREPARE st6 FROM @s6; EXECUTE st6; DEALLOCATE PREPARE st6;
         SET i = i + 1;
     END WHILE;
 END $$

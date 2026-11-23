@@ -1,21 +1,27 @@
 package com.mall.seckill.service.impl;
 
 import com.mall.common.ResultCode;
+import com.mall.common.constants.CommonConstant;
 import com.mall.common.constants.RedisKey;
 import com.mall.common.context.UserContext;
 import com.mall.common.exception.BizException;
+import com.mall.common.message.SeckillOrderMessage;
 import com.mall.common.metrics.BusinessMetrics;
 import com.mall.common.util.IdGenerator;
 import com.mall.common.util.LuaScriptExecutor;
 import com.mall.seckill.domain.entity.SeckillActivity;
 import com.mall.seckill.feign.OrderFeignClient;
 import com.mall.seckill.service.SeckillActivityService;
+import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.SendResult;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -112,9 +118,30 @@ class SeckillServiceImplTest {
         assertEquals("ORD-9002", orderId);
     }
 
+    @Test
+    void seckill_shouldPropagateProductCodeInOrderMessage() {
+        when(activityService.getDetail(2001L)).thenReturn(activeActivity(2001L));
+        when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_SECKILL), anyList(), any(), any(), any()))
+                .thenReturn(List.of(0L, 4L));
+        when(luaExecutor.parse(List.of(0L, 4L))).thenReturn(new long[]{0L, 4L});
+        when(idGenerator.nextIdStr()).thenReturn("ORD-9003");
+        SendResult<String, Object> sendResult = new SendResult<>(
+                null,
+                new RecordMetadata(new TopicPartition(CommonConstant.MQ_TOPIC_SECKILL, 0), 0, 0, 0, 0, 0));
+        when(kafkaTemplate.send(anyString(), eq("ORD-9003"), any()))
+                .thenReturn(CompletableFuture.completedFuture(sendResult));
+
+        String orderId = seckillService.seckill(2001L);
+        assertEquals("ORD-9003", orderId);
+        ArgumentCaptor<SeckillOrderMessage> captor = ArgumentCaptor.forClass(SeckillOrderMessage.class);
+        verify(kafkaTemplate).send(eq(CommonConstant.MQ_TOPIC_SECKILL), eq("ORD-9003"), captor.capture());
+        assertEquals("SKU-2026-001", captor.getValue().getProductCode());
+    }
+
     private SeckillActivity activeActivity(long id) {
         SeckillActivity a = new SeckillActivity();
         a.setId(id);
+        a.setProductCode("SKU-2026-001");
         a.setProductName("iPhone");
         a.setSeckillPrice(new BigDecimal("5999.00"));
         a.setStartTime(LocalDateTime.now().minusHours(1));

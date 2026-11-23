@@ -23,7 +23,10 @@ public class CouponClaimMessage implements Serializable {
     private String couponName;
     private Integer type;
     private BigDecimal discountValue;
+    private BigDecimal maxDiscountAmount;
     private BigDecimal threshold;
+    private Integer target;
+    private String productCode;
     private Integer status;
     private LocalDateTime expireTime;
     private LocalDateTime createTime;

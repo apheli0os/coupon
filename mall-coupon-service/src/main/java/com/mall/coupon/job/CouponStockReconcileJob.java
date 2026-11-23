@@ -60,44 +60,62 @@ public class CouponStockReconcileJob {
 
     void reconcileSingle(CouponTemplate template, LocalDateTime now) {
         Long templateId = template.getId();
-        if (hasInFlightTokens(templateId)) {
-            log.debug("优惠券模板存在在途落库凭证，跳过本轮对账 templateId={}", templateId);
-            return;
-        }
-        long dbCount = userCouponMapper.countByTemplate(templateId);
-        int total = template.getTotal() == null ? 0 : template.getTotal();
-        long expectedStock = Math.max(0L, total - dbCount);
+        RLock templateLock = redissonClient.getLock(RedisKey.couponTemplateLock(templateId));
+        boolean locked = false;
+        try {
+            locked = templateLock.tryLock(0, TimeUnit.SECONDS);
+            if (!locked) {
+                return;
+            }
+            CouponTemplate latest = templateMapper.selectById(templateId);
+            if (latest == null || !Integer.valueOf(CouponEnums.TEMPLATE_ACTIVE).equals(latest.getStatus())) {
+                return;
+            }
+            if (hasInFlightTokens(templateId)) {
+                log.debug("优惠券模板存在在途落库凭证，跳过本轮对账 templateId={}", templateId);
+                return;
+            }
+            long dbCount = userCouponMapper.countByTemplate(templateId);
+            int total = latest.getTotal() == null ? 0 : latest.getTotal();
+            long expectedStock = Math.max(0L, total - dbCount);
 
-        String stockKey = RedisKey.couponStock(templateId);
-        String currentRaw = stringRedisTemplate.opsForValue().get(stockKey);
-        long currentStock = currentRaw == null ? -1L : Long.parseLong(currentRaw);
+            String stockKey = RedisKey.couponStock(templateId);
+            String currentRaw = stringRedisTemplate.opsForValue().get(stockKey);
+            long currentStock = currentRaw == null ? -1L : Long.parseLong(currentRaw);
 
-        if (currentStock == expectedStock) {
-            return;
-        }
+            if (currentStock == expectedStock) {
+                return;
+            }
 
-        Duration ttl = RedisKey.activityKeyTtl(now, template.getEndTime());
-        stringRedisTemplate.opsForValue().set(stockKey, String.valueOf(expectedStock), ttl);
+            Duration ttl = RedisKey.activityKeyTtl(now, latest.getEndTime());
+            stringRedisTemplate.opsForValue().set(stockKey, String.valueOf(expectedStock), ttl);
 
-        String claimHashKey = RedisKey.couponClaimHash(templateId);
-        stringRedisTemplate.delete(claimHashKey);
-        List<Map<String, Object>> grouped = userCouponMapper.countGroupedByUser(templateId);
-        if (grouped != null && !grouped.isEmpty()) {
-            Map<String, String> rebuilt = new HashMap<>();
-            for (Map<String, Object> row : grouped) {
-                Object uid = row.get("userId");
-                Object cnt = row.get("cnt");
-                if (uid != null && cnt != null) {
-                    rebuilt.put(String.valueOf(uid), String.valueOf(cnt));
+            String claimHashKey = RedisKey.couponClaimHash(templateId);
+            stringRedisTemplate.delete(claimHashKey);
+            List<Map<String, Object>> grouped = userCouponMapper.countGroupedByUser(templateId);
+            if (grouped != null && !grouped.isEmpty()) {
+                Map<String, String> rebuilt = new HashMap<>();
+                for (Map<String, Object> row : grouped) {
+                    Object uid = row.get("userId");
+                    Object cnt = row.get("cnt");
+                    if (uid != null && cnt != null) {
+                        rebuilt.put(String.valueOf(uid), String.valueOf(cnt));
+                    }
+                }
+                if (!rebuilt.isEmpty()) {
+                    stringRedisTemplate.opsForHash().putAll(claimHashKey, rebuilt);
+                    stringRedisTemplate.expire(claimHashKey, ttl);
                 }
             }
-            if (!rebuilt.isEmpty()) {
-                stringRedisTemplate.opsForHash().putAll(claimHashKey, rebuilt);
-                stringRedisTemplate.expire(claimHashKey, ttl);
+            log.warn("[RECONCILE] 修复优惠券 Redis-DB 库存偏差 templateId={} redisStock={} expectedStock={} dbCount={}",
+                    templateId, currentStock, expectedStock, dbCount);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            if (locked && templateLock.isHeldByCurrentThread()) {
+                templateLock.unlock();
             }
         }
-        log.warn("[RECONCILE] 修复优惠券 Redis-DB 库存偏差 templateId={} redisStock={} expectedStock={} dbCount={}",
-                templateId, currentStock, expectedStock, dbCount);
     }
 
     boolean hasInFlightTokens(Long templateId) {

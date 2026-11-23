@@ -6,6 +6,7 @@ import com.mall.coupon.domain.enums.CouponEnums;
 import com.mall.coupon.mapper.CouponTemplateMapper;
 import com.mall.coupon.mapper.UserCouponMapper;
 import org.junit.jupiter.api.Test;
+import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.HashOperations;
@@ -17,6 +18,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -29,7 +31,7 @@ class CouponStockReconcileJobTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void reconcileSingle_shouldRepairDriftedRedisStockAndClaimsWhenNoInFlightTokens() {
+    void reconcileSingle_shouldRepairDriftedRedisStockAndClaimsWhenNoInFlightTokens() throws Exception {
         CouponTemplateMapper templateMapper = mock(CouponTemplateMapper.class);
         UserCouponMapper userCouponMapper = mock(UserCouponMapper.class);
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
@@ -41,12 +43,17 @@ class CouponStockReconcileJobTest {
         when(emptyCursor.hasNext()).thenReturn(false);
         when(redis.scan(any(ScanOptions.class))).thenReturn(emptyCursor);
         RedissonClient redisson = mock(RedissonClient.class);
+        RLock lock = mock(RLock.class);
+        when(redisson.getLock(RedisKey.couponTemplateLock(100L))).thenReturn(lock);
+        when(lock.tryLock(0, TimeUnit.SECONDS)).thenReturn(true);
+        when(lock.isHeldByCurrentThread()).thenReturn(true);
 
         CouponTemplate tpl = new CouponTemplate();
         tpl.setId(100L);
         tpl.setTotal(10);
         tpl.setStatus(CouponEnums.TEMPLATE_ACTIVE);
         tpl.setEndTime(LocalDateTime.now().plusDays(1));
+        when(templateMapper.selectById(100L)).thenReturn(tpl);
 
         when(userCouponMapper.countByTemplate(100L)).thenReturn(2L);
         when(valueOps.get(RedisKey.couponStock(100L))).thenReturn("7");
@@ -60,11 +67,12 @@ class CouponStockReconcileJobTest {
         verify(valueOps).set(eq(RedisKey.couponStock(100L)), eq("8"), any(Duration.class));
         verify(redis).delete(RedisKey.couponClaimHash(100L));
         verify(hashOps).putAll(eq(RedisKey.couponClaimHash(100L)), eq(Map.of("1001", "1", "1002", "1")));
+        verify(lock).unlock();
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void reconcileSingle_shouldSkipWhenInFlightTokensExist() {
+    void reconcileSingle_shouldSkipWhenInFlightTokensExistOrLockContested() throws Exception {
         CouponTemplateMapper templateMapper = mock(CouponTemplateMapper.class);
         UserCouponMapper userCouponMapper = mock(UserCouponMapper.class);
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
@@ -74,14 +82,20 @@ class CouponStockReconcileJobTest {
         when(busyCursor.hasNext()).thenReturn(true);
         when(redis.scan(any(ScanOptions.class))).thenReturn(busyCursor);
         RedissonClient redisson = mock(RedissonClient.class);
+        RLock lock = mock(RLock.class);
+        when(redisson.getLock(RedisKey.couponTemplateLock(100L))).thenReturn(lock);
+        when(lock.tryLock(0, TimeUnit.SECONDS)).thenReturn(true, false);
+        when(lock.isHeldByCurrentThread()).thenReturn(true);
 
         CouponTemplate tpl = new CouponTemplate();
         tpl.setId(100L);
         tpl.setTotal(10);
         tpl.setStatus(CouponEnums.TEMPLATE_ACTIVE);
         tpl.setEndTime(LocalDateTime.now().plusDays(1));
+        when(templateMapper.selectById(100L)).thenReturn(tpl);
 
         CouponStockReconcileJob job = new CouponStockReconcileJob(templateMapper, userCouponMapper, redis, redisson);
+        job.reconcileSingle(tpl, LocalDateTime.now());
         job.reconcileSingle(tpl, LocalDateTime.now());
 
         verify(userCouponMapper, never()).countByTemplate(any());

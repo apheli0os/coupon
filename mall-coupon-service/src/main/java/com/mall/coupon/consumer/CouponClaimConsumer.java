@@ -153,7 +153,10 @@ public class CouponClaimConsumer {
         coupon.setCouponName(m.getCouponName());
         coupon.setType(m.getType());
         coupon.setDiscountValue(m.getDiscountValue());
+        coupon.setMaxDiscountAmount(m.getMaxDiscountAmount());
         coupon.setThreshold(m.getThreshold());
+        coupon.setTarget(m.getTarget() == null ? Integer.valueOf(0) : m.getTarget());
+        coupon.setProductCode(m.getProductCode());
         coupon.setStatus(m.getStatus());
         coupon.setExpireTime(m.getExpireTime());
         coupon.setCreateTime(m.getCreateTime());

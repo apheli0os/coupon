@@ -1,5 +1,7 @@
 package com.mall.coupon.service;
 
+import com.mall.coupon.domain.dto.CouponQuoteRequestDTO;
+import com.mall.coupon.domain.dto.CouponQuoteResponseDTO;
 import com.mall.coupon.domain.dto.CouponUseDTO;
 import com.mall.coupon.domain.entity.UserCoupon;
 
@@ -11,6 +13,8 @@ public interface CouponService {
     void claim(Long templateId);
 
     List<UserCoupon> listMyCoupons(Integer status);
+
+    CouponQuoteResponseDTO quoteCoupons(CouponQuoteRequestDTO dto);
 
     /** 核销券，条件更新保证幂等 */
     void useCoupon(CouponUseDTO dto);

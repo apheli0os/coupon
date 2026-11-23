@@ -30,6 +30,16 @@ rules:
           standard:
             shardingColumn: user_id
             shardingAlgorithmName: coupon-tbl-inline
+      coupon_settlement:
+        actualDataNodes: ds${0..1}.coupon_settlement_${0..3}
+        databaseStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: coupon-db-inline
+        tableStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: coupon-settlement-tbl-inline
     shardingAlgorithms:
       coupon-db-inline:
         type: INLINE
@@ -39,6 +49,10 @@ rules:
         type: INLINE
         props:
           algorithm-expression: user_coupon_${Math.floorMod(user_id.longValue(), 4)}
+      coupon-settlement-tbl-inline:
+        type: INLINE
+        props:
+          algorithm-expression: coupon_settlement_${Math.floorMod(user_id.longValue(), 4)}
 
 props:
   sql-show: false
