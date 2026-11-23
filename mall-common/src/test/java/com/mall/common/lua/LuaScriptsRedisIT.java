@@ -6,8 +6,10 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.redisson.Redisson;
+import org.redisson.api.RedissonClient;
+import org.redisson.config.Config;
+import org.redisson.spring.data.connection.RedissonConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -27,25 +29,31 @@ class LuaScriptsRedisIT {
                     .withExposedPorts(6379)
                     .withCommand("redis-server", "--save", "", "--appendonly", "no");
 
-    private static LettuceConnectionFactory connectionFactory;
+    private static RedissonClient redissonClient;
+    private static RedissonConnectionFactory connectionFactory;
     private static StringRedisTemplate redisTemplate;
     private static LuaScriptExecutor luaExecutor;
 
     @BeforeAll
-    static void startRedis() {
+    static void startRedis() throws Exception {
         REDIS.start();
-        RedisStandaloneConfiguration config = new RedisStandaloneConfiguration(
-                REDIS.getHost(), REDIS.getMappedPort(6379));
-        connectionFactory = new LettuceConnectionFactory(config);
+        Config config = new Config();
+        config.useSingleServer()
+                .setAddress("redis://" + REDIS.getHost() + ":" + REDIS.getMappedPort(6379));
+        redissonClient = Redisson.create(config);
+        connectionFactory = new RedissonConnectionFactory(redissonClient);
         connectionFactory.afterPropertiesSet();
         redisTemplate = new StringRedisTemplate(connectionFactory);
         luaExecutor = new LuaScriptExecutor(redisTemplate);
     }
 
     @AfterAll
-    static void stopRedis() {
+    static void stopRedis() throws Exception {
         if (connectionFactory != null) {
             connectionFactory.destroy();
+        }
+        if (redissonClient != null) {
+            redissonClient.shutdown();
         }
     }
 

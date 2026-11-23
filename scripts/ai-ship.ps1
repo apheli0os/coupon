@@ -74,6 +74,10 @@ try {
     }
 
     $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
+    if (-not $ghCmd -and (Test-Path "C:\Program Files\GitHub CLI\gh.exe")) {
+        $env:Path = "C:\Program Files\GitHub CLI;$env:Path"
+        $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
+    }
     if ($ghCmd) {
         & gh auth status *> $null
         if ($LASTEXITCODE -eq 0) {

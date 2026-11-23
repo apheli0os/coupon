@@ -44,7 +44,7 @@
         <spotless.version>2.43.0</spotless.version>
         <checkstyle.version>3.3.1</checkstyle.version>
         <jacoco.version>0.8.13</jacoco.version>
-        <testcontainers.version>1.20.4</testcontainers.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
         <archunit.version>1.4.0</archunit.version>
         <spotbugs-plugin.version>4.9.3.0</spotbugs-plugin.version>
         <spotbugs.version>4.9.3</spotbugs.version>
@@ -279,11 +279,18 @@
                     <version>${surefire.version}</version>
                     <configuration>
                         <skipITs>${skip.it}</skipITs>
+                        <classesDirectory>${project.build.outputDirectory}</classesDirectory>
                         <includes>
                             <include>**/*IT.java</include>
                         </includes>
                         <forkCount>1</forkCount>
                         <reuseForks>true</reuseForks>
+                        <systemPropertyVariables>
+                            <api.version>1.44</api.version>
+                        </systemPropertyVariables>
+                        <environmentVariables>
+                            <DOCKER_API_VERSION>1.44</DOCKER_API_VERSION>
+                        </environmentVariables>
                     </configuration>
                     <executions>
                         <execution>
