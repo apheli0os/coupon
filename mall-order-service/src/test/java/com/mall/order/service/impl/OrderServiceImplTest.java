@@ -11,6 +11,7 @@ import com.mall.common.message.OrderPaidMessage;
 import com.mall.common.message.OrderQueryResult;
 import com.mall.common.message.SeckillOrderMessage;
 import com.mall.common.pricing.CouponPricing;
+import com.mall.common.seckill.SeckillReservationStore;
 import com.mall.common.util.LuaScriptExecutor;
 import com.mall.order.domain.entity.SeckillOrder;
 import com.mall.order.feign.CouponFeignClient;
@@ -52,6 +53,7 @@ class OrderServiceImplTest {
     private TransactionTemplate transactionTemplate;
     private KafkaTemplate<String, Object> kafkaTemplate;
     private CouponFeignClient couponFeignClient;
+    private SeckillReservationStore reservations;
     private OrderServiceImpl orderService;
 
     @BeforeEach
@@ -69,9 +71,10 @@ class OrderServiceImplTest {
         });
         kafkaTemplate = mock(KafkaTemplate.class);
         couponFeignClient = mock(CouponFeignClient.class);
+        reservations = mock(SeckillReservationStore.class);
         orderService = new OrderServiceImpl(
                 orderMapper, stringRedisTemplate, luaExecutor, transactionTemplate,
-                kafkaTemplate, couponFeignClient);
+                kafkaTemplate, couponFeignClient, reservations);
     }
 
     @Test
@@ -110,6 +113,31 @@ class OrderServiceImplTest {
         assertEquals(new BigDecimal("5999.00"), orderCaptor.getValue().getPayAmount());
         verify(valueOps).set(eq("seckill:{2001}:token:ORD-2"), eq("CONSUMED:ORD-2"), any(Duration.class));
         verify(kafkaTemplate).send(eq(CommonConstant.MQ_TOPIC_SECKILL_ORDER_CREATED), eq("ORD-2"), any());
+    }
+
+    @Test
+    void createSeckillOrder_shouldRejectReleasedReservationWithoutLegacyCompensation() {
+        SeckillOrderMessage message = sampleMessage("ORD-RELEASED", 2001L, 1001L);
+        message.setReservationTracked(true);
+
+        orderService.createSeckillOrder(message);
+
+        verify(reservations).claim(message);
+        verify(orderMapper, never()).insert(any(SeckillOrder.class));
+        verify(luaExecutor, never()).execute(eq(LuaScriptExecutor.SCRIPT_SECKILL_EXPIRE_COMPENSATE), anyList(), any(), any());
+    }
+
+    @Test
+    void createSeckillOrder_shouldCompleteReservationWhenRetryFindsCommittedOrder() {
+        SeckillOrderMessage message = sampleMessage("ORD-RECOVER", 2001L, 1001L);
+        message.setReservationTracked(true);
+        when(orderMapper.selectById("ORD-RECOVER")).thenReturn(sampleOrder("ORD-RECOVER", 2001L, 1001L));
+
+        orderService.createSeckillOrder(message);
+
+        verify(reservations, never()).claim(message);
+        verify(reservations).complete(2001L, "ORD-RECOVER");
+        verify(orderMapper, never()).insert(any(SeckillOrder.class));
     }
 
     @Test

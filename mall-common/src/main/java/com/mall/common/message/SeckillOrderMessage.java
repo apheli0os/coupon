@@ -25,4 +25,5 @@ public class SeckillOrderMessage implements Serializable {
     /** 预扣库存命中的桶索引，关单归还库存时需要 */
     private Integer stockBucket;
     private LocalDateTime createTime;
+    private Boolean reservationTracked;
 }

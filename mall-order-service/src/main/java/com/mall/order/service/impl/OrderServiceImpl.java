@@ -14,6 +14,7 @@ import com.mall.common.message.SeckillOrderMessage;
 import com.mall.common.pricing.CouponPricing;
 import com.mall.common.pricing.CouponPricingResult;
 import com.mall.common.pricing.CouponPricingRule;
+import com.mall.common.seckill.SeckillReservationStore;
 import com.mall.common.util.LuaScriptExecutor;
 import com.mall.order.domain.entity.SeckillOrder;
 import com.mall.order.feign.CouponFeignClient;
@@ -47,28 +48,24 @@ public class OrderServiceImpl implements OrderService {
     private final TransactionTemplate transactionTemplate;
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final CouponFeignClient couponFeignClient;
+    private final SeckillReservationStore reservations;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createSeckillOrder(SeckillOrderMessage message) {
+        boolean tracked = Boolean.TRUE.equals(message.getReservationTracked());
         String tokenKey = RedisKey.seckillOrderToken(message.getActivityId(), message.getOrderId());
         SeckillOrder existing = orderMapper.selectById(message.getOrderId());
         if (existing != null) {
-            if (!Integer.valueOf(2).equals(existing.getStatus())) {
-                markTokenConsumed(tokenKey, message.getOrderId());
+            if (tracked || !Integer.valueOf(2).equals(existing.getStatus())) {
+                completeReservation(message, tokenKey);
             }
             log.info("订单已存在，幂等跳过 orderId={} status={}", message.getOrderId(), existing.getStatus());
             return;
         }
 
-        long[] claimRes = luaExecutor.parse(luaExecutor.execute(
-                LuaScriptExecutor.SCRIPT_TOKEN_CLAIM,
-                List.of(tokenKey),
-                message.getOrderId(),
-                RedisKey.TOKEN_TTL_SECONDS));
-        if (claimRes[0] != 1L) {
-            compensateExpiredTokenQuietly(message, tokenKey);
-            log.warn("凭证缺失、已被生产端回滚或已过期，拒绝落单并已触发幂等补偿校验 orderId={} activityId={} userId={}",
+        if (!claimReservation(message, tokenKey)) {
+            log.warn("秒杀凭证已过期、已释放或不匹配，拒绝落单 orderId={} activityId={} userId={}",
                     message.getOrderId(), message.getActivityId(), message.getUserId());
             return;
         }
@@ -93,12 +90,43 @@ public class OrderServiceImpl implements OrderService {
 
         try {
             orderMapper.insert(order);
-            schedulePostOrderCreated(tokenKey, order);
+            runAfterCommit(() -> {
+                completeReservation(message, tokenKey);
+                publishOrderCreatedEventQuietly(order);
+            });
             log.info("秒杀订单落库成功 orderId={} userId={}", order.getOrderId(), order.getUserId());
         } catch (DuplicateKeyException e) {
-            // 主键 order_id 与活跃唯一索引 (activity_id, user_id, active_flag) 兜底幂等
-            scheduleMarkTokenConsumed(tokenKey, message.getOrderId());
+            if (tracked) {
+                throw e;
+            }
+            runAfterCommit(() -> markTokenConsumed(tokenKey, message.getOrderId()));
             log.info("消息重复消费，幂等忽略 orderId={}", message.getOrderId());
+        }
+    }
+
+    private boolean claimReservation(SeckillOrderMessage message, String tokenKey) {
+        if (Boolean.TRUE.equals(message.getReservationTracked())) {
+            return reservations.claim(message);
+        }
+        long[] result = luaExecutor.parse(luaExecutor.execute(
+                LuaScriptExecutor.SCRIPT_TOKEN_CLAIM, List.of(tokenKey),
+                message.getOrderId(), RedisKey.TOKEN_TTL_SECONDS));
+        if (result[0] == 1L) {
+            return true;
+        }
+        compensateExpiredTokenQuietly(message, tokenKey);
+        return false;
+    }
+
+    private void completeReservation(SeckillOrderMessage message, String tokenKey) {
+        if (!Boolean.TRUE.equals(message.getReservationTracked())) {
+            markTokenConsumed(tokenKey, message.getOrderId());
+            return;
+        }
+        try {
+            reservations.complete(message.getActivityId(), message.getOrderId());
+        } catch (RuntimeException e) {
+            log.warn("订单已落库，预占清理待重试 orderId={}", message.getOrderId(), e);
         }
     }
 
@@ -336,7 +364,10 @@ public class OrderServiceImpl implements OrderService {
                         RedisKey.seckillStockBucket(order.getActivityId(), bucket),
                         RedisKey.seckillUsers(order.getActivityId()),
                         RedisKey.seckillOrderRollbackGuard(order.getActivityId(), order.getOrderId()),
-                        RedisKey.seckillOrderToken(order.getActivityId(), order.getOrderId())),
+                        RedisKey.seckillOrderToken(order.getActivityId(), order.getOrderId()),
+                        RedisKey.seckillReservationOwners(order.getActivityId()),
+                        RedisKey.seckillReservationsDue(order.getActivityId()),
+                        RedisKey.seckillReservation(order.getActivityId(), order.getOrderId())),
                 String.valueOf(order.getUserId()),
                 order.getOrderId(),
                 RedisKey.ROLLBACK_GUARD_TTL_SECONDS);
@@ -379,7 +410,8 @@ public class OrderServiceImpl implements OrderService {
                             RedisKey.seckillStockBucket(message.getActivityId(), bucket),
                             RedisKey.seckillUsers(message.getActivityId()),
                             tokenKey,
-                            RedisKey.seckillOrderRollbackGuard(message.getActivityId(), message.getOrderId())),
+                            RedisKey.seckillOrderRollbackGuard(message.getActivityId(), message.getOrderId()),
+                            RedisKey.seckillReservationOwners(message.getActivityId())),
                     String.valueOf(message.getUserId()),
                     RedisKey.ROLLBACK_GUARD_TTL_SECONDS));
             if (res[0] == 0L) {
@@ -392,18 +424,16 @@ public class OrderServiceImpl implements OrderService {
         }
     }
 
-    private void schedulePostOrderCreated(String tokenKey, SeckillOrder order) {
+    private void runAfterCommit(Runnable action) {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    markTokenConsumed(tokenKey, order.getOrderId());
-                    publishOrderCreatedEventQuietly(order);
+                    action.run();
                 }
             });
         } else {
-            markTokenConsumed(tokenKey, order.getOrderId());
-            publishOrderCreatedEventQuietly(order);
+            action.run();
         }
     }
 
@@ -419,19 +449,6 @@ public class OrderServiceImpl implements OrderService {
             kafkaTemplate.send(CommonConstant.MQ_TOPIC_SECKILL_ORDER_CREATED, order.getOrderId(), event);
         } catch (Exception e) {
             log.warn("发送建单销量计数事件失败（不影响核心订单落库） orderId={}", order.getOrderId(), e);
-        }
-    }
-
-    private void scheduleMarkTokenConsumed(String tokenKey, String orderId) {
-        if (TransactionSynchronizationManager.isActualTransactionActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    markTokenConsumed(tokenKey, orderId);
-                }
-            });
-        } else {
-            markTokenConsumed(tokenKey, orderId);
         }
     }
 

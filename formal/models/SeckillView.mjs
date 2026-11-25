@@ -11,9 +11,13 @@ export const step = (action, from, to) => {
     case "UserBuy": return "user buys (Lua deduct + per-order token)";
     case "KafkaSendAck": return "Kafka ack";
     case "KafkaTimeoutAfterBroker": return "Kafka timeout -> guarded rollback";
-    case "TokenTtlExpire": return "order token TTL expires";
-    case "OrderConsumeCommit": return "order created (+ emit order-created) or expire-compensate";
-    case "OrderConsumeClaimCrash": return "consumer crash after token claim";
+    case "ProducerCrashBeforeSend": return "producer stops after atomic reservation";
+    case "ReleaseDueReservation": return "sweep returns stock for unclaimed reservation";
+    case "OrderConsumeClaim": return "consumer claims reservation";
+    case "OrderConsumeCommit": return "order created or stale delivery discarded";
+    case "DropProcessingDelivery": return "delivery lost after consumer claim";
+    case "ReplayProcessing": return "sweep retries creation for claimed reservation";
+    case "CompleteReservation": return "remove committed reservation from recovery queue";
     case "KafkaRedeliver": return "Kafka redelivers old order";
     case "OrderConsumeRedeliver": return "duplicate order skipped safely";
     case "PayOrder": return "user pays";

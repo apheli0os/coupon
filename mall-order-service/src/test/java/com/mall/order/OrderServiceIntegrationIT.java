@@ -2,6 +2,7 @@ package com.mall.order;
 
 import com.mall.common.constants.RedisKey;
 import com.mall.common.message.SeckillOrderMessage;
+import com.mall.common.seckill.SeckillReservationStore;
 import com.mall.order.domain.entity.SeckillOrder;
 import com.mall.order.mapper.SeckillOrderMapper;
 import com.mall.order.service.OrderService;
@@ -22,7 +23,10 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(classes = OrderServiceApplication.class)
 class OrderServiceIntegrationIT {
@@ -83,6 +87,9 @@ class OrderServiceIntegrationIT {
     @Autowired
     private StringRedisTemplate redisTemplate;
 
+    @Autowired
+    private SeckillReservationStore reservations;
+
     @Test
     void createCancelAndRebuy_shouldKeepPerOrderTokenIsolatedInRealMysqlAndRedis() {
         long actId = 2001L;
@@ -123,6 +130,31 @@ class OrderServiceIntegrationIT {
         assertNotNull(created2);
         assertEquals(0, created2.getStatus());
         assertEquals(2, orderMapper.selectById("ORD-IT-1").getStatus());
+    }
+
+    @Test
+    void recoverClaimedReservation_shouldCommitOrderOnceAndClearRecoveryIndex() {
+        long activityId = 2002L;
+        String stockKey = RedisKey.seckillStockBucket(activityId, 0);
+        String dueKey = RedisKey.seckillReservationsDue(activityId);
+        redisTemplate.opsForValue().set(stockKey, "1", Duration.ofMinutes(10));
+        redisTemplate.opsForValue().set(RedisKey.seckillStatus(activityId), RedisKey.STATUS_ACTIVE, Duration.ofMinutes(10));
+        SeckillOrderMessage message = msg("ORD-IT-RECOVER", activityId, 30002L);
+        message.setReservationTracked(true);
+        assertEquals(0L, reservations.reserve(message)[0]);
+        assertTrue(reservations.claim(message));
+        assertNull(orderMapper.selectById(message.getOrderId()));
+        redisTemplate.opsForZSet().add(dueKey, message.getOrderId(), 1);
+
+        orderService.createSeckillOrder(reservations.recover(activityId, message.getOrderId()).orElseThrow());
+        orderService.createSeckillOrder(message);
+
+        SeckillOrder committed = orderMapper.selectById(message.getOrderId());
+        assertNotNull(committed);
+        assertEquals(0, committed.getStatus());
+        assertEquals("SKU-2026-001", committed.getProductCode());
+        assertEquals("0", redisTemplate.opsForValue().get(stockKey));
+        assertFalse(redisTemplate.hasKey(dueKey));
     }
 
     private SeckillOrderMessage msg(String orderId, long activityId, long userId) {

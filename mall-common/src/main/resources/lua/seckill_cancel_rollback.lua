@@ -4,6 +4,11 @@
 -- KEYS[1] 库存桶  KEYS[2] 已购用户 Set  KEYS[3] 关单幂等键  KEYS[4] tokenKey
 -- ARGV[1] userId  ARGV[2] orderId  ARGV[3] guardTtlSeconds
 -- 返回 {code, 当前桶库存}  code: 0=本次归还成功 1=已归还过(幂等跳过)
+local owner = redis.call('HGET', KEYS[5], ARGV[1])
+if owner and owner ~= ARGV[2] then
+  return {1, tonumber(redis.call('GET', KEYS[1]) or '0')}
+end
+
 if redis.call('SET', KEYS[3], '1', 'EX', tonumber(ARGV[3]), 'NX') == false then
   local stock = tonumber(redis.call('GET', KEYS[1]) or '0')
   return {1, stock}
@@ -14,8 +19,11 @@ if curTok == ARGV[2] or curTok == ('PROCESSING:' .. ARGV[2]) or curTok == ('CONS
   redis.call('DEL', KEYS[4])
 end
 
+redis.call('HDEL', KEYS[5], ARGV[1])
+redis.call('ZREM', KEYS[6], ARGV[2])
+redis.call('DEL', KEYS[7])
 local removed = redis.call('SREM', KEYS[2], ARGV[1])
-if removed == 1 then
+if (owner or removed == 1) and redis.call('EXISTS', KEYS[1]) == 1 then
   local stock = redis.call('INCR', KEYS[1])
   return {0, stock}
 end

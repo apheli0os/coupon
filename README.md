@@ -84,27 +84,30 @@ sequenceDiagram
     participant O as order-service
 
     U->>S: POST /api/seckill/{activityId}/buy
-    S->>S: Sentinel 限流 + 活动时间校验
-    S->>R: Lua: 活动状态/重复购买/库存校验 + DECR + SADD
+    S->>S: Sentinel 限流 + 活动时间校验 + 生成 orderId
+    S->>R: Lua 原子扣减库存并登记预占和到期索引
     R-->>S: {code, 扣减桶索引}
-    S->>S: 生成 orderId，写幂等 Token
     S->>MQ: send(seckill-topic, key=orderId).get()
-    MQ-->>S: 记录落盘
+    MQ-->>S: Broker 确认
     S-->>U: 返回 orderId（异步落单）
     MQ->>O: 消费消息（失败重试5次→DLQ）
-    O->>O: Token 校验 + DB 唯一索引幂等 + 订单落库
+    O->>R: 认领预占
+    O->>O: DB 唯一索引幂等 + 订单落库
+    O->>R: 提交后完成预占并移除到期索引
     MQ->>S: seckill-sold-counter-group 异步累加销量
     U->>S: GET /api/seckill/result?activityId=xxx 轮询结果
 ```
 
 **关键设计：**
 
-1. **库存预热**：发布活动时把 DB 库存写入 16 个 Redis 桶，之后所有抢购请求不查 DB。
-2. **一人一单**：Lua 中用 Set 记录已购用户，消费端再用 `uk_activity_user(activity_id, user_id)` 唯一索引兜底。
-3. **失败补偿**：Lua 预扣成功但 Kafka 发送失败，立即执行回滚脚本按实际扣减桶归还库存并移除购买标记。
-4. **请求线程零 DB 写入**：订单落库、销量累加全部由 Kafka 消费者异步完成，消费者并发可配（`concurrency`），与瞬时流量解耦。这是实测 QPS 从 ~90 提升到 3200+ 的关键。
+1. **库存预热**。发布活动时把库存写入 16 个 Redis 桶，抢购请求在 Redis 校验并扣减库存。
+2. **一人一单**。Lua 检查购买资格并绑定预占归属。订单库通过 `uk_activity_user_active` 约束同一用户在同一活动中的有效订单数量。
+3. **未落单预占恢复**。发送失败时，Lua 只释放尚未认领的预占。订单服务默认每 10 秒扫描到期索引。30 分钟内未被认领的预占会归还库存，已认领的预占每隔 30 秒可以用原消息尝试落单或确认已有订单。
+4. **请求线程零 DB 写入**。订单落库和销量累加走异步链路，Kafka 消费并发可配置。
 5. **异步可感知**：抢购接口返回 orderId，前端轮询 `/api/seckill/result` 获取最终订单状态。
-6. **可靠投递**：Token 凭证 + 幂等消费 + 失败重投；重试耗尽转 DLQ 告警；15 分钟未支付由定时任务扫描订单表按 `stock_bucket` 归还库存（不依赖 MQ 延迟消息）。
+6. **订单超时**。Kafka 消费重试耗尽后进入 DLQ 并告警。已落单且 15 分钟未支付的订单，由关单任务按 `stock_bucket` 归还库存。
+
+滚动发布先更新订单服务，再更新秒杀服务。订单服务支持存量 Kafka 消息携带的旧 token。使用 Redis 持久化及复制可降低故障切换时丢失预占记录的风险。
 
 ### 3.3 Hash Tag 与 Redis Cluster
 
