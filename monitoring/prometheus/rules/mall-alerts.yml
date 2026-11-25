@@ -52,6 +52,30 @@ groups:
           summary: "领券成功数 10 分钟为零"
           description: "检查 Kafka 消费者是否积压、券模板是否都已发完"
 
+      - alert: CouponStockReconcileDriftAlert
+        expr: increase(mall_coupon_reconcile_alert_total[5m]) > 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "优惠券库存对账出现大额异常偏差"
+          description: "两轮防抖后库存偏差超过自动修复阈值，需人工核查"
+
+      - alert: CouponStockReconcileFrequentAutoFix
+        expr: increase(mall_coupon_reconcile_autofix_total[15m]) >= 3
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "优惠券库存对账频繁自动修复"
+          description: "15 分钟内连续多次触发对账自动修复，需排查扣减或补偿链路"
+
+      - alert: GatewayCircuitBreakerOpen
+        expr: resilience4j_circuitbreaker_state{state="open"} == 1
+        for: 30s
+        labels: {severity: critical}
+        annotations:
+          summary: "网关熔断器处于开启状态"
+          description: "下游服务异常触发网关熔断降级"
+
   - name: mall-middleware
     rules:
       - alert: RedisMasterSwitched

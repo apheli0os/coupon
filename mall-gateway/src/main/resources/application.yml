@@ -19,6 +19,26 @@ spring:
           uri: lb://mall-coupon-service
           predicates:
             - Path=/api/auth/**
+        - id: coupon-claim-route
+          uri: lb://mall-coupon-service
+          predicates:
+            - Path=/api/coupon/claim/**
+            - Method=POST
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 30
+                redis-rate-limiter.burstCapacity: 60
+                key-resolver: "#{@userKeyResolver}"
+            - name: CircuitBreaker
+              args:
+                name: couponServiceCb
+                fallbackUri: forward:/fallback/coupon
+                statusCodes:
+                  - 500
+                  - 502
+                  - 503
+                  - 504
         - id: coupon-route
           uri: lb://mall-coupon-service
           predicates:
@@ -26,9 +46,38 @@ spring:
           filters:
             - name: RequestRateLimiter
               args:
-                redis-rate-limiter.replenishRate: 100
-                redis-rate-limiter.burstCapacity: 200
+                redis-rate-limiter.replenishRate: 150
+                redis-rate-limiter.burstCapacity: 300
                 key-resolver: "#{@userKeyResolver}"
+            - name: CircuitBreaker
+              args:
+                name: couponServiceCb
+                fallbackUri: forward:/fallback/coupon
+                statusCodes:
+                  - 500
+                  - 502
+                  - 503
+                  - 504
+        - id: seckill-buy-route
+          uri: lb://mall-seckill-service
+          predicates:
+            - Path=/api/seckill/*/buy
+            - Method=POST
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 30
+                redis-rate-limiter.burstCapacity: 60
+                key-resolver: "#{@userKeyResolver}"
+            - name: CircuitBreaker
+              args:
+                name: seckillServiceCb
+                fallbackUri: forward:/fallback/seckill
+                statusCodes:
+                  - 500
+                  - 502
+                  - 503
+                  - 504
         - id: seckill-route
           uri: lb://mall-seckill-service
           predicates:
@@ -36,13 +85,37 @@ spring:
           filters:
             - name: RequestRateLimiter
               args:
-                redis-rate-limiter.replenishRate: 50
-                redis-rate-limiter.burstCapacity: 100
+                redis-rate-limiter.replenishRate: 150
+                redis-rate-limiter.burstCapacity: 300
                 key-resolver: "#{@userKeyResolver}"
+            - name: CircuitBreaker
+              args:
+                name: seckillServiceCb
+                fallbackUri: forward:/fallback/seckill
+                statusCodes:
+                  - 500
+                  - 502
+                  - 503
+                  - 504
         - id: order-route
           uri: lb://mall-order-service
           predicates:
             - Path=/api/orders/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 100
+                redis-rate-limiter.burstCapacity: 200
+                key-resolver: "#{@userKeyResolver}"
+            - name: CircuitBreaker
+              args:
+                name: orderServiceCb
+                fallbackUri: forward:/fallback/order
+                statusCodes:
+                  - 500
+                  - 502
+                  - 503
+                  - 504
       default-filters:
         - RemoveRequestHeader=Cookie
       globalcors:
@@ -79,3 +152,21 @@ management:
         http.server.requests: true
     tags:
       application: ${spring.application.name}
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 5
+  timelimiter:
+    configs:
+      default:
+        timeoutDuration: 4s
+
+logging:
+  pattern:
+    level: "%5p [traceId=%X{traceId:-}]"

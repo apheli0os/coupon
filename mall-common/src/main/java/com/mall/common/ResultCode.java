@@ -51,7 +51,8 @@ public enum ResultCode {
 
     /* 基础设施 9xxx */
     LOCK_ACQUIRE_FAILED(9001, "系统繁忙，请稍后重试"),
-    MQ_SEND_FAILED(9002, "消息发送失败，请稍后重试");
+    MQ_SEND_FAILED(9002, "消息发送失败，请稍后重试"),
+    DUPLICATE_SUBMIT(9003, "请勿重复提交，请稍后再试");
 
     private final int code;
     private final String message;

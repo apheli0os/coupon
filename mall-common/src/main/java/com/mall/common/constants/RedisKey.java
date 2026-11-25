@@ -43,6 +43,26 @@ public final class RedisKey {
         return "coupon:{" + templateId + "}:rollback:" + userCouponId;
     }
 
+    public static String couponReconcilePending(Long templateId) {
+        return "coupon:{" + templateId + "}:reconcile:pending";
+    }
+
+    public static String couponTemplateBloomFilter() {
+        return "coupon:{bloom}:template";
+    }
+
+    public static String userUnusedCouponZSet(Long userId) {
+        return "coupon:user:{" + userId + "}:unused";
+    }
+
+    public static String userUnusedCouponEpoch(Long userId) {
+        return "coupon:user:{" + userId + "}:unused:epoch";
+    }
+
+    public static String jwtBlacklist(String jti) {
+        return "auth:jwt:blacklist:" + jti;
+    }
+
     /* ===== 秒杀 ===== */
 
     /**

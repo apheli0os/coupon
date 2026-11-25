@@ -11,6 +11,8 @@ public final class CommonConstant {
     public static final String USER_ROLE_HEADER = "X-User-Role";
     public static final String INTERNAL_AUTH_HEADER = "X-Internal-Key";
     public static final String DEFAULT_INTERNAL_KEY = "mall-coupon-platform-default-internal-key-2026";
+    public static final String TRACE_ID_HEADER = "X-Trace-Id";
+    public static final String MDC_TRACE_ID = "traceId";
     public static final String ROLE_USER = "USER";
     public static final String ROLE_ADMIN = "ADMIN";
 

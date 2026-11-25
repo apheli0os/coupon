@@ -3,10 +3,12 @@ package com.mall.coupon.controller;
 import com.mall.common.PageResult;
 import com.mall.common.R;
 import com.mall.common.context.UserContext;
+import com.mall.common.idempotent.NoDuplicateSubmit;
 import com.mall.coupon.domain.dto.CouponTemplateCreateDTO;
 import com.mall.coupon.domain.dto.CouponTemplateIncreaseStockDTO;
 import com.mall.coupon.domain.dto.CouponTemplatePageQueryDTO;
 import com.mall.coupon.domain.entity.CouponTemplate;
+import com.mall.coupon.domain.entity.CouponTemplateAuditLog;
 import com.mall.coupon.service.CouponTemplateService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -31,6 +33,7 @@ public class CouponTemplateController {
 
     @Operation(summary = "创建券模板（管理员）")
     @PostMapping
+    @NoDuplicateSubmit(lockSeconds = 3)
     public R<Long> create(@Valid @RequestBody CouponTemplateCreateDTO dto) {
         UserContext.requireAdmin();
         return R.ok(templateService.create(dto));
@@ -38,6 +41,7 @@ public class CouponTemplateController {
 
     @Operation(summary = "发布活动（预热库存，管理员）")
     @PostMapping("/{id}/publish")
+    @NoDuplicateSubmit(unlockOnFinish = true)
     public R<Void> publish(@PathVariable Long id) {
         UserContext.requireAdmin();
         templateService.publish(id);
@@ -45,6 +49,7 @@ public class CouponTemplateController {
     }
 
     @PostMapping("/{id}/increase-stock")
+    @NoDuplicateSubmit(unlockOnFinish = true)
     public R<Void> increaseStock(
             @PathVariable Long id,
             @Valid @RequestBody CouponTemplateIncreaseStockDTO dto) {
@@ -54,10 +59,17 @@ public class CouponTemplateController {
     }
 
     @PostMapping("/{id}/terminate")
+    @NoDuplicateSubmit(unlockOnFinish = true)
     public R<Void> terminate(@PathVariable Long id) {
         UserContext.requireAdmin();
         templateService.terminate(id);
         return R.ok();
+    }
+
+    @GetMapping("/{id}/audits")
+    public R<List<CouponTemplateAuditLog>> audits(@PathVariable Long id) {
+        UserContext.requireAdmin();
+        return R.ok(templateService.listAudits(id));
     }
 
     @GetMapping("/page")

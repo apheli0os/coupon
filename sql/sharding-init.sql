@@ -12,6 +12,7 @@ CREATE DATABASE IF NOT EXISTS mall_order_1 DEFAULT CHARACTER SET utf8mb4 COLLATE
 -- 券模板表数据量小，留在单库 mall_coupon_0，不做分片（seckill_activity 属于 mall_seckill 独立域，不放在订单库）
 CREATE TABLE IF NOT EXISTS mall_coupon_0.coupon_template LIKE mall_coupon.coupon_template;
 INSERT IGNORE INTO mall_coupon_0.coupon_template SELECT * FROM mall_coupon.coupon_template;
+CREATE TABLE IF NOT EXISTS mall_coupon_0.coupon_template_audit_log LIKE mall_coupon.coupon_template_audit_log;
 
 DELIMITER $$
 

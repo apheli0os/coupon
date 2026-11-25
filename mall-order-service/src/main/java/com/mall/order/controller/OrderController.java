@@ -2,6 +2,7 @@ package com.mall.order.controller;
 
 import com.mall.common.R;
 import com.mall.common.context.UserContext;
+import com.mall.common.idempotent.NoDuplicateSubmit;
 import com.mall.common.message.OrderQueryResult;
 import com.mall.order.domain.dto.OrderApplyCouponDTO;
 import com.mall.order.domain.entity.SeckillOrder;
@@ -53,6 +54,7 @@ public class OrderController {
 
     @Operation(summary = "支付订单")
     @PostMapping("/{orderId}/pay")
+    @NoDuplicateSubmit(unlockOnFinish = true)
     public R<Void> pay(@PathVariable String orderId) {
         long userId = UserContext.getRequired();
         orderService.pay(orderId, userId);
@@ -60,6 +62,7 @@ public class OrderController {
     }
 
     @PostMapping("/{orderId}/apply-coupon")
+    @NoDuplicateSubmit(unlockOnFinish = true)
     public R<SeckillOrder> applyCoupon(
             @PathVariable String orderId,
             @Valid @RequestBody OrderApplyCouponDTO dto) {
@@ -78,6 +81,7 @@ public class OrderController {
 
     @Operation(summary = "取消订单")
     @PostMapping("/{orderId}/cancel")
+    @NoDuplicateSubmit(unlockOnFinish = true)
     public R<Void> cancel(@PathVariable String orderId) {
         long userId = UserContext.getRequired();
         orderService.cancel(orderId, userId, UserContext.isAdmin());

@@ -11,6 +11,7 @@ import com.mall.common.pricing.CouponPricing;
 import com.mall.common.pricing.CouponPricingResult;
 import com.mall.common.pricing.CouponPricingRule;
 import com.mall.common.util.IdGenerator;
+import com.mall.coupon.cache.UserCouponCacheService;
 import com.mall.coupon.domain.entity.CouponSettlement;
 import com.mall.coupon.domain.entity.UserCoupon;
 import com.mall.coupon.domain.enums.CouponEnums;
@@ -31,6 +32,7 @@ import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 @Service
@@ -46,6 +48,7 @@ public class CouponSettlementServiceImpl implements CouponSettlementService {
     private final IdGenerator idGenerator;
     private final TransactionTemplate transactionTemplate;
     private final OrderFeignClient orderFeignClient;
+    private final UserCouponCacheService userCouponCacheService;
 
     @Override
     public CouponLockResult lockCoupon(CouponLockRequest request) {
@@ -110,6 +113,7 @@ public class CouponSettlementServiceImpl implements CouponSettlementService {
         log.info("优惠券锁券成功 userId={} couponId={} orderId={} discount={} pay={}",
                 request.getUserId(), coupon.getId(), orderId,
                 priced.discountAmount(), priced.payAmount());
+        userCouponCacheService.removeUnusedCoupon(request.getUserId(), coupon.getId());
         return buildLockResult(coupon, priced.discountAmount(), priced.payAmount());
     }
 
@@ -149,10 +153,18 @@ public class CouponSettlementServiceImpl implements CouponSettlementService {
             }
             return;
         }
+        List<Long> affectedUsers = userId != null
+                ? List.of(userId)
+                : userCouponMapper.selectUsedUserIdsByOrderId(normalizedOrderId);
         int refunded = userId != null
                 ? userCouponMapper.refundByOrderAndUser(userId, normalizedOrderId)
                 : userCouponMapper.refundByOrderId(normalizedOrderId);
         if (refunded > 0) {
+            if (affectedUsers != null) {
+                for (Long affectedUserId : affectedUsers) {
+                    userCouponCacheService.evictUnusedCoupons(affectedUserId);
+                }
+            }
             log.info("订单取消自动退回已核销优惠券 orderId={} userId={} refunded={}",
                     normalizedOrderId, userId, refunded);
         }
@@ -236,8 +248,12 @@ public class CouponSettlementServiceImpl implements CouponSettlementService {
             Long userCouponId,
             int targetStatus,
             boolean settle) {
+        AtomicReference<Long> affectedUserId = new AtomicReference<>(userId);
         Boolean completed = transactionTemplate.execute(tx -> {
             CouponSettlement settlement = findSettlementByOrderAndCoupon(userId, orderId, userCouponId);
+            if (settlement != null && settlement.getUserId() != null) {
+                affectedUserId.set(settlement.getUserId());
+            }
             if (settlement == null || Integer.valueOf(targetStatus).equals(settlement.getStatus())) {
                 return Boolean.TRUE;
             }
@@ -267,6 +283,14 @@ public class CouponSettlementServiceImpl implements CouponSettlementService {
             return Boolean.TRUE;
         });
         if (!Boolean.FALSE.equals(completed)) {
+            Long targetUserId = affectedUserId.get();
+            if (targetUserId != null) {
+                if (settle) {
+                    userCouponCacheService.removeUnusedCoupon(targetUserId, userCouponId);
+                } else {
+                    userCouponCacheService.evictUnusedCoupons(targetUserId);
+                }
+            }
             return;
         }
         CouponSettlement latest = findSettlementByOrderAndCoupon(userId, orderId, userCouponId);

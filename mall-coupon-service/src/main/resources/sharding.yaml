@@ -20,6 +20,8 @@ rules:
     tables:
       coupon_template:
         actualDataNodes: ds0.coupon_template
+      coupon_template_audit_log:
+        actualDataNodes: ds0.coupon_template_audit_log
       user_coupon:
         actualDataNodes: ds${0..1}.user_coupon_${0..3}
         databaseStrategy:

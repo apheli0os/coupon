@@ -40,6 +40,7 @@ spring:
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       properties:
         spring.json.add.type.headers: true
+        interceptor.classes: com.mall.common.trace.TraceKafkaProducerInterceptor
     consumer:
       group-id: order-seckill-consumer-group
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
@@ -96,3 +97,7 @@ resilience4j:
     configs:
       default:
         timeoutDuration: 3s
+
+logging:
+  pattern:
+    level: "%5p [traceId=%X{traceId:-}]"

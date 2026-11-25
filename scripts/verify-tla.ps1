@@ -28,7 +28,7 @@ $javaCmd = if ($env:JAVA -and (Test-Path $env:JAVA)) {
     "java"
 }
 
-$models = @("SeckillProtocol", "CouponLifecycle", "ActivityTemplateLifecycle")
+$models = @("SeckillProtocol", "CouponLifecycle", "ActivityTemplateLifecycle", "StockReconcileDebounce")
 
 Push-Location $modelsDir
 try {

@@ -52,6 +52,7 @@ spring:
         batch.size: 32768
         request.timeout.ms: 5000
         delivery.timeout.ms: 15000
+        interceptor.classes: com.mall.common.trace.TraceKafkaProducerInterceptor
     consumer:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
@@ -102,3 +103,7 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
+logging:
+  pattern:
+    level: "%5p [traceId=%X{traceId:-}]"

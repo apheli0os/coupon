@@ -25,6 +25,7 @@ public class LuaScriptExecutor {
     public static final String SCRIPT_COUPON_ROLLBACK = "lua/coupon_rollback.lua";
     public static final String SCRIPT_COUPON_EXPIRE_COMPENSATE = "lua/coupon_expire_compensate.lua";
     public static final String SCRIPT_COUPON_STOCK_INCR_IF_PRESENT = "lua/coupon_stock_incr_if_present.lua";
+    public static final String SCRIPT_COUPON_RECONCILE_STOCK = "lua/coupon_reconcile_stock.lua";
     public static final String SCRIPT_SECKILL = "lua/seckill.lua";
     public static final String SCRIPT_SECKILL_ROLLBACK = "lua/seckill_rollback.lua";
     public static final String SCRIPT_SECKILL_EXPIRE_COMPENSATE = "lua/seckill_expire_compensate.lua";

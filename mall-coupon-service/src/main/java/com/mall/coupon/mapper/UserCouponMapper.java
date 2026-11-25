@@ -32,6 +32,9 @@ public interface UserCouponMapper extends BaseMapper<UserCoupon> {
             "WHERE order_id = #{orderId} AND status = 1")
     int refundByOrderId(@Param("orderId") String orderId);
 
+    @Select("SELECT DISTINCT user_id FROM user_coupon WHERE order_id = #{orderId} AND status = 1")
+    List<Long> selectUsedUserIdsByOrderId(@Param("orderId") String orderId);
+
     @Update("UPDATE user_coupon " +
             "SET status = CASE WHEN expire_time > NOW() THEN 0 ELSE 2 END, " +
             "order_id = NULL, use_time = NULL, update_time = NOW() " +

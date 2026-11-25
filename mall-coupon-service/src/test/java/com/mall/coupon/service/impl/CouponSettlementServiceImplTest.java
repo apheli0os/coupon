@@ -8,6 +8,7 @@ import com.mall.common.message.CouponUnlockRequest;
 import com.mall.common.message.OrderQueryResult;
 import com.mall.common.exception.BizException;
 import com.mall.common.util.IdGenerator;
+import com.mall.coupon.cache.UserCouponCacheService;
 import com.mall.coupon.domain.entity.CouponSettlement;
 import com.mall.coupon.domain.entity.UserCoupon;
 import com.mall.coupon.domain.enums.CouponEnums;
@@ -44,6 +45,7 @@ class CouponSettlementServiceImplTest {
     private IdGenerator idGenerator;
     private TransactionTemplate transactionTemplate;
     private OrderFeignClient orderFeignClient;
+    private UserCouponCacheService userCouponCacheService;
     private CouponSettlementServiceImpl service;
 
     @BeforeEach
@@ -62,8 +64,10 @@ class CouponSettlementServiceImplTest {
             return null;
         }).when(transactionTemplate).executeWithoutResult(any());
         orderFeignClient = mock(OrderFeignClient.class);
+        userCouponCacheService = mock(UserCouponCacheService.class);
         service = new CouponSettlementServiceImpl(
-                settlementMapper, userCouponMapper, idGenerator, transactionTemplate, orderFeignClient);
+                settlementMapper, userCouponMapper, idGenerator,
+                transactionTemplate, orderFeignClient, userCouponCacheService);
     }
 
     @Test
@@ -241,6 +245,43 @@ class CouponSettlementServiceImplTest {
         verify(settlementMapper, never()).advanceToCancelled(5L, 1001L);
         verify(settlementMapper, never()).advanceToCancelled(6L, 1001L);
         verify(settlementMapper, never()).advanceToCancelled(7L, 1001L);
+    }
+
+    @Test
+    void settlementLifecycle_shouldUpdateUserCouponCacheIncludingNullUserIdPaths() {
+        UserCoupon coupon = unusedDiscountCoupon(801L, 1001L);
+        when(settlementMapper.selectByOrderAndCoupon(1001L, "ORD-CACHE-1", 801L)).thenReturn(null);
+        when(userCouponMapper.selectByIdAndUser(801L, 1001L)).thenReturn(coupon);
+        when(idGenerator.nextId()).thenReturn(8101L);
+        when(userCouponMapper.lockCoupon(801L, 1001L, "ORD-CACHE-1")).thenReturn(1);
+
+        service.lockCoupon(lockRequest(1001L, "ORD-CACHE-1", 801L, new BigDecimal("1000.00")));
+        verify(userCouponCacheService).removeUnusedCoupon(1001L, 801L);
+
+        CouponSettlement lockedForSettle = settlement(8101L, 1001L, "ORD-CACHE-1", 801L, CouponEnums.SETTLEMENT_LOCKED);
+        when(settlementMapper.selectByOrderAndCouponWithoutUser("ORD-CACHE-1", 801L)).thenReturn(lockedForSettle);
+        when(settlementMapper.advanceToSettled(8101L, 1001L)).thenReturn(1);
+        when(userCouponMapper.settleLockedCoupon(801L, 1001L, "ORD-CACHE-1")).thenReturn(1);
+        service.settleByOrder("ORD-CACHE-1", null, 801L);
+        verify(userCouponCacheService, org.mockito.Mockito.times(2)).removeUnusedCoupon(1001L, 801L);
+
+        CouponSettlement lockedForUnlock = settlement(8102L, 1001L, "ORD-CACHE-2", 802L, CouponEnums.SETTLEMENT_LOCKED);
+        when(settlementMapper.selectByOrderAndCoupon(1001L, "ORD-CACHE-2", 802L)).thenReturn(lockedForUnlock);
+        when(settlementMapper.advanceToCancelled(8102L, 1001L)).thenReturn(1);
+        when(userCouponMapper.unlockLockedCoupon(802L, 1001L, "ORD-CACHE-2")).thenReturn(1);
+        CouponUnlockRequest unlockReq = new CouponUnlockRequest();
+        unlockReq.setUserId(1001L);
+        unlockReq.setOrderId("ORD-CACHE-2");
+        unlockReq.setUserCouponId(802L);
+        service.unlockCoupon(unlockReq);
+        verify(userCouponCacheService).evictUnusedCoupons(1001L);
+
+        when(settlementMapper.selectLockedByOrderId("ORD-NULL-USER")).thenReturn(List.of());
+        when(userCouponMapper.selectUsedUserIdsByOrderId("ORD-NULL-USER")).thenReturn(List.of(1001L, 1002L));
+        when(userCouponMapper.refundByOrderId("ORD-NULL-USER")).thenReturn(1);
+        service.unlockOrRefundByOrder("ORD-NULL-USER", null);
+        verify(userCouponCacheService, org.mockito.Mockito.times(2)).evictUnusedCoupons(1001L);
+        verify(userCouponCacheService).evictUnusedCoupons(1002L);
     }
 
     private OrderQueryResult orderResult(String orderId, int status, Long couponId) {

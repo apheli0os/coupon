@@ -11,6 +11,7 @@ import org.springframework.util.StringUtils;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.UUID;
 
 /**
  * JWT 工具。生产环境密钥应从配置中心/KMS 注入，且长度不少于 32 字节。
@@ -38,6 +39,7 @@ public final class JwtUtil {
         Date now = new Date();
         String safeRole = StringUtils.hasText(role) ? role.toUpperCase() : CommonConstant.ROLE_USER;
         return Jwts.builder()
+                .id(UUID.randomUUID().toString().replace("-", ""))
                 .subject(String.valueOf(userId))
                 .claim("userId", userId)
                 .claim("username", username)
@@ -46,6 +48,11 @@ public final class JwtUtil {
                 .expiration(new Date(now.getTime() + expireMillis))
                 .signWith(key)
                 .compact();
+    }
+
+    public String parseJti(String token) {
+        Claims claims = parseClaims(token);
+        return claims == null ? null : claims.getId();
     }
 
     /** 解析失败返回 null，由调用方决定是否放行 */

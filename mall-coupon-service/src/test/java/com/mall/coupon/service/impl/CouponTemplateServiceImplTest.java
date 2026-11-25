@@ -10,11 +10,14 @@ import com.mall.common.constants.RedisKey;
 import com.mall.common.exception.BizException;
 import com.mall.common.util.IdGenerator;
 import com.mall.common.util.LuaScriptExecutor;
+import com.mall.coupon.cache.CouponTemplateBloomFilter;
 import com.mall.coupon.domain.dto.CouponTemplateCreateDTO;
 import com.mall.coupon.domain.dto.CouponTemplatePageQueryDTO;
 import com.mall.coupon.domain.entity.CouponTemplate;
+import com.mall.coupon.domain.entity.CouponTemplateAuditLog;
 import com.mall.coupon.domain.enums.CouponEnums;
 import com.mall.coupon.mapper.CouponTemplateMapper;
+import com.mall.coupon.service.CouponTemplateAuditService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,6 +63,8 @@ class CouponTemplateServiceImplTest {
     private MultiLevelCache multiLevelCache;
     private TransactionTemplate transactionTemplate;
     private LuaScriptExecutor luaExecutor;
+    private CouponTemplateBloomFilter bloomFilter;
+    private CouponTemplateAuditService auditService;
     private CouponTemplateServiceImpl service;
 
     @BeforeEach
@@ -89,9 +94,13 @@ class CouponTemplateServiceImplTest {
             return null;
         }).when(transactionTemplate).executeWithoutResult(any());
         luaExecutor = mock(LuaScriptExecutor.class);
+        bloomFilter = mock(CouponTemplateBloomFilter.class);
+        when(bloomFilter.mightContain(anyLong())).thenReturn(true);
+        auditService = mock(CouponTemplateAuditService.class);
         service = new CouponTemplateServiceImpl(
                 templateMapper, stringRedisTemplate, redissonClient,
-                idGenerator, multiLevelCache, transactionTemplate, luaExecutor);
+                idGenerator, multiLevelCache, transactionTemplate, luaExecutor,
+                bloomFilter, auditService);
     }
 
     @Test
@@ -284,5 +293,17 @@ class CouponTemplateServiceImplTest {
         assertEquals(1L, result.getTotal());
         assertEquals(1, result.getRecords().size());
         assertEquals(1001L, result.getRecords().get(0).getId());
+    }
+
+    @Test
+    void getDetailAndListAudits_shouldRespectBloomFilterAndDelegateAuditService() {
+        when(bloomFilter.mightContain(404L)).thenReturn(false);
+        assertNull(service.getDetail(404L));
+        verify(multiLevelCache, never()).get(anyString(), any(), any(), any());
+
+        CouponTemplateAuditLog logEntry = new CouponTemplateAuditLog();
+        logEntry.setId(9001L);
+        when(auditService.listByTemplate(1001L)).thenReturn(List.of(logEntry));
+        assertEquals(1, service.listAudits(1001L).size());
     }
 }

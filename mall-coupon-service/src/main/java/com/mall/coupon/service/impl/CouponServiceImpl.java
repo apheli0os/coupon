@@ -3,6 +3,8 @@ package com.mall.coupon.service.impl;
 import com.alibaba.csp.sentinel.annotation.SentinelResource;
 import com.alibaba.csp.sentinel.slots.block.BlockException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.mall.common.PageResult;
 import com.mall.common.R;
 import com.mall.common.ResultCode;
 import com.mall.common.constants.CommonConstant;
@@ -16,6 +18,7 @@ import com.mall.common.pricing.CouponPricingResult;
 import com.mall.common.pricing.CouponPricingRule;
 import com.mall.common.util.IdGenerator;
 import com.mall.common.util.LuaScriptExecutor;
+import com.mall.coupon.cache.UserCouponCacheService;
 import com.mall.coupon.domain.dto.CouponQuoteRequestDTO;
 import com.mall.coupon.domain.dto.CouponQuoteResponseDTO;
 import com.mall.coupon.domain.dto.CouponUseDTO;
@@ -55,6 +58,7 @@ public class CouponServiceImpl implements CouponService {
     private final OrderFeignClient orderFeignClient;
     private final BusinessMetrics metrics;
     private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final UserCouponCacheService userCouponCacheService;
 
     /**
      * 领券：Redis Lua 原子预扣 + Kafka 异步落库。
@@ -179,6 +183,14 @@ public class CouponServiceImpl implements CouponService {
     @Override
     public List<UserCoupon> listMyCoupons(Integer status) {
         long userId = UserContext.getRequired();
+        if (Integer.valueOf(CouponEnums.COUPON_UNUSED).equals(status)) {
+            List<UserCoupon> cached = new ArrayList<>(
+                    userCouponCacheService.listUnusedCoupons(userId, LocalDateTime.now()));
+            cached.sort(Comparator.comparing(
+                    UserCoupon::getCreateTime,
+                    Comparator.nullsLast(Comparator.reverseOrder())));
+            return cached;
+        }
         LambdaQueryWrapper<UserCoupon> query = new LambdaQueryWrapper<UserCoupon>()
                 .eq(UserCoupon::getUserId, userId)
                 .orderByDesc(UserCoupon::getCreateTime);
@@ -189,17 +201,31 @@ public class CouponServiceImpl implements CouponService {
     }
 
     @Override
+    public PageResult<UserCoupon> pageMyCoupons(long pageNum, long pageSize, Integer status) {
+        long userId = UserContext.getRequired();
+        long safeNum = Math.max(1L, pageNum);
+        long safeSize = Math.min(100L, Math.max(1L, pageSize));
+        LambdaQueryWrapper<UserCoupon> query = new LambdaQueryWrapper<UserCoupon>()
+                .eq(UserCoupon::getUserId, userId)
+                .eq(status != null, UserCoupon::getStatus, status)
+                .gt(Integer.valueOf(CouponEnums.COUPON_UNUSED).equals(status),
+                        UserCoupon::getExpireTime, LocalDateTime.now())
+                .orderByDesc(UserCoupon::getCreateTime);
+        Page<UserCoupon> page = userCouponMapper.selectPage(new Page<>(safeNum, safeSize), query);
+        if (page == null) {
+            return PageResult.of(safeNum, safeSize, 0L, List.of());
+        }
+        return PageResult.of(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
+    }
+
+    @Override
     public CouponQuoteResponseDTO quoteCoupons(CouponQuoteRequestDTO dto) {
         long userId = UserContext.getRequired();
         if (dto == null || dto.getOrderAmount() == null || dto.getOrderAmount().compareTo(BigDecimal.ZERO) <= 0) {
             throw new BizException(ResultCode.PARAM_ERROR, "订单金额必须大于 0");
         }
         LocalDateTime now = LocalDateTime.now();
-        List<UserCoupon> coupons = userCouponMapper.selectList(new LambdaQueryWrapper<UserCoupon>()
-                .eq(UserCoupon::getUserId, userId)
-                .eq(UserCoupon::getStatus, CouponEnums.COUPON_UNUSED)
-                .gt(UserCoupon::getExpireTime, now)
-                .orderByAsc(UserCoupon::getExpireTime));
+        List<UserCoupon> coupons = userCouponCacheService.listUnusedCoupons(userId, now);
         List<CouponQuoteItemVO> available = new ArrayList<>();
         List<CouponQuoteItemVO> unavailable = new ArrayList<>();
         if (coupons != null) {
