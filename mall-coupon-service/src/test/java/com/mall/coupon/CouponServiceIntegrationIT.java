@@ -5,9 +5,11 @@ import com.mall.coupon.consumer.CouponClaimConsumer;
 import com.mall.coupon.consumer.OrderCancelCouponRefundConsumer;
 import com.mall.coupon.domain.entity.CouponSettlement;
 import com.mall.coupon.domain.entity.CouponTemplate;
+import com.mall.coupon.domain.entity.CouponTemplateAuditLog;
 import com.mall.coupon.domain.entity.UserCoupon;
 import com.mall.coupon.domain.enums.CouponEnums;
 import com.mall.coupon.mapper.CouponSettlementMapper;
+import com.mall.coupon.mapper.CouponTemplateAuditLogMapper;
 import com.mall.coupon.mapper.CouponTemplateMapper;
 import com.mall.coupon.mapper.UserCouponMapper;
 import org.junit.jupiter.api.Test;
@@ -91,6 +93,9 @@ class CouponServiceIntegrationIT {
     private CouponSettlementMapper settlementMapper;
 
     @Autowired
+    private CouponTemplateAuditLogMapper auditLogMapper;
+
+    @Autowired
     private CouponClaimConsumer claimConsumer;
 
     @Autowired
@@ -166,6 +171,7 @@ class CouponServiceIntegrationIT {
         usedExpired.setUpdateTime(now);
         assertEquals(1, userCouponMapper.insert(usedExpired));
 
+        assertEquals(List.of(10002L), userCouponMapper.selectUsedUserIdsByOrderId("ORD-IT-EXP"));
         assertEquals(1, userCouponMapper.refundByOrderId("ORD-IT-EXP"));
         UserCoupon refundedExpired = userCouponMapper.selectById(90002L);
         assertEquals(CouponEnums.COUPON_EXPIRED, refundedExpired.getStatus());
@@ -201,5 +207,16 @@ class CouponServiceIntegrationIT {
 
         assertEquals(1, templateMapper.incrReceivedBy(1002L, 500));
         assertEquals(0, templateMapper.incrReceivedBy(1002L, 1));
+
+        CouponTemplateAuditLog audit = new CouponTemplateAuditLog();
+        audit.setId(92001L);
+        audit.setTemplateId(1001L);
+        audit.setOperatorId(10001L);
+        audit.setAction("TERMINATE");
+        audit.setDetail("it-check");
+        audit.setTraceId("trace-it-1");
+        audit.setCreateTime(now);
+        assertEquals(1, auditLogMapper.insert(audit));
+        assertNotNull(auditLogMapper.selectById(92001L));
     }
 }

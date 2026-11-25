@@ -9,11 +9,14 @@ import com.mall.common.constants.RedisKey;
 import com.mall.common.exception.BizException;
 import com.mall.common.util.IdGenerator;
 import com.mall.common.util.LuaScriptExecutor;
+import com.mall.coupon.cache.CouponTemplateBloomFilter;
 import com.mall.coupon.domain.dto.CouponTemplateCreateDTO;
 import com.mall.coupon.domain.dto.CouponTemplatePageQueryDTO;
 import com.mall.coupon.domain.entity.CouponTemplate;
+import com.mall.coupon.domain.entity.CouponTemplateAuditLog;
 import com.mall.coupon.domain.enums.CouponEnums;
 import com.mall.coupon.mapper.CouponTemplateMapper;
+import com.mall.coupon.service.CouponTemplateAuditService;
 import com.mall.coupon.service.CouponTemplateService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +25,8 @@ import org.redisson.api.RedissonClient;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
@@ -43,6 +48,8 @@ public class CouponTemplateServiceImpl implements CouponTemplateService {
     private final MultiLevelCache multiLevelCache;
     private final TransactionTemplate transactionTemplate;
     private final LuaScriptExecutor luaExecutor;
+    private final CouponTemplateBloomFilter bloomFilter;
+    private final CouponTemplateAuditService auditService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -68,7 +75,22 @@ public class CouponTemplateServiceImpl implements CouponTemplateService {
         t.setCreateTime(LocalDateTime.now());
         t.setUpdateTime(t.getCreateTime());
         templateMapper.insert(t);
+        scheduleBloomAdd(t.getId());
+        auditService.record(t.getId(), "CREATE", "total=" + t.getTotal() + ",type=" + t.getType());
         return t.getId();
+    }
+
+    private void scheduleBloomAdd(Long templateId) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    bloomFilter.add(templateId);
+                }
+            });
+            return;
+        }
+        bloomFilter.add(templateId);
     }
 
     private void validateCreateDto(CouponTemplateCreateDTO dto) {
@@ -158,6 +180,7 @@ public class CouponTemplateServiceImpl implements CouponTemplateService {
                 stringRedisTemplate.expire(stockKey, ttl);
                 stringRedisTemplate.expire(claimHashKey, ttl);
                 multiLevelCache.invalidate(RedisKey.couponTemplateCache(templateId));
+                bloomFilter.add(templateId);
                 log.info("优惠券模板已处于活跃态，幂等刷新状态与TTL templateId={} status={}", templateId, ctx.targetStatus());
                 return;
             }
@@ -171,6 +194,8 @@ public class CouponTemplateServiceImpl implements CouponTemplateService {
                 stringRedisTemplate.expire(claimHashKey, ttl);
             }
             multiLevelCache.invalidate(RedisKey.couponTemplateCache(templateId));
+            bloomFilter.add(templateId);
+            auditService.record(templateId, "PUBLISH", "status=" + ctx.targetStatus() + ",remain=" + remain);
             log.info("优惠券模板发布成功 templateId={} remain={} status={}", templateId, remain, ctx.targetStatus());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -184,6 +209,9 @@ public class CouponTemplateServiceImpl implements CouponTemplateService {
 
     @Override
     public CouponTemplate getDetail(Long templateId) {
+        if (!bloomFilter.mightContain(templateId)) {
+            return null;
+        }
         return multiLevelCache.get(RedisKey.couponTemplateCache(templateId), CouponTemplate.class,
                 () -> templateMapper.selectById(templateId),
                 Duration.ofSeconds(RedisKey.TEMPLATE_CACHE_TTL_SECONDS));
@@ -227,6 +255,7 @@ public class CouponTemplateServiceImpl implements CouponTemplateService {
                     List.of(RedisKey.couponStock(templateId)),
                     delta);
             multiLevelCache.invalidate(RedisKey.couponTemplateCache(templateId));
+            auditService.record(templateId, "INCREASE_STOCK", "delta=" + delta);
             log.info("优惠券模板动态增发库存成功 templateId={} delta={}", templateId, delta);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -263,6 +292,7 @@ public class CouponTemplateServiceImpl implements CouponTemplateService {
                 stringRedisTemplate.opsForValue().set(
                         RedisKey.couponStatus(templateId), RedisKey.STATUS_ENDED, ttl);
                 multiLevelCache.invalidate(RedisKey.couponTemplateCache(templateId));
+                auditService.record(templateId, "TERMINATE", "terminated");
                 log.info("优惠券模板已提前终止 templateId={}", templateId);
             }
         } catch (InterruptedException e) {
@@ -294,6 +324,11 @@ public class CouponTemplateServiceImpl implements CouponTemplateService {
             return PageResult.of(pageNum, pageSize, 0L, List.of());
         }
         return PageResult.of(page.getCurrent(), page.getSize(), page.getTotal(), page.getRecords());
+    }
+
+    @Override
+    public List<CouponTemplateAuditLog> listAudits(Long templateId) {
+        return auditService.listByTemplate(templateId);
     }
 
     private record PublishContext(CouponTemplate template, int prevStatus, int targetStatus) {

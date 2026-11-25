@@ -4,6 +4,7 @@ import com.mall.common.PageResult;
 import com.mall.coupon.domain.dto.CouponTemplateCreateDTO;
 import com.mall.coupon.domain.dto.CouponTemplatePageQueryDTO;
 import com.mall.coupon.domain.entity.CouponTemplate;
+import com.mall.coupon.domain.entity.CouponTemplateAuditLog;
 
 import java.util.List;
 
@@ -24,4 +25,6 @@ public interface CouponTemplateService {
     void terminate(Long templateId);
 
     PageResult<CouponTemplate> pageQuery(CouponTemplatePageQueryDTO query);
+
+    List<CouponTemplateAuditLog> listAudits(Long templateId);
 }

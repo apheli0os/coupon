@@ -1,6 +1,8 @@
 package com.mall.gateway;
 
+import com.mall.gateway.controller.GatewayFallbackController;
 import com.mall.gateway.filter.AuthGlobalFilter;
+import com.mall.gateway.filter.TraceIdGlobalFilter;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -42,12 +44,20 @@ class GatewayContextIT {
     private AuthGlobalFilter authGlobalFilter;
 
     @Autowired
+    private TraceIdGlobalFilter traceIdGlobalFilter;
+
+    @Autowired
+    private GatewayFallbackController gatewayFallbackController;
+
+    @Autowired
     private KeyResolver userKeyResolver;
 
     @Test
     void gatewayContext_shouldLoadSecurityFilterAndRateLimiterResolver() {
         assertNotNull(context);
         assertNotNull(authGlobalFilter);
+        assertNotNull(traceIdGlobalFilter);
+        assertNotNull(gatewayFallbackController);
         assertNotNull(userKeyResolver);
     }
 }

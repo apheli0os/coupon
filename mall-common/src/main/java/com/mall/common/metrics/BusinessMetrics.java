@@ -17,6 +17,10 @@ public class BusinessMetrics {
     private final Counter seckillSoldOut;
     private final Counter seckillRejected;
     private final Counter couponClaimSuccess;
+    private final Counter couponReconcileAutoFix;
+    private final Counter couponReconcileAlert;
+    private final Counter couponBloomRejected;
+    private final Counter duplicateSubmitRejected;
     private final Timer seckillLatency;
 
     public BusinessMetrics(MeterRegistry registry) {
@@ -28,6 +32,14 @@ public class BusinessMetrics {
                 .description("被限流/重复购买拒绝的次数").register(registry);
         this.couponClaimSuccess = Counter.builder("mall.coupon.claim.success.total")
                 .description("领券成功数").register(registry);
+        this.couponReconcileAutoFix = Counter.builder("mall.coupon.reconcile.autofix.total")
+                .description("优惠券对账自动修复次数").register(registry);
+        this.couponReconcileAlert = Counter.builder("mall.coupon.reconcile.alert.total")
+                .description("优惠券对账超阈值告警次数").register(registry);
+        this.couponBloomRejected = Counter.builder("mall.coupon.bloom.rejected.total")
+                .description("优惠券模板布隆过滤器拦截次数").register(registry);
+        this.duplicateSubmitRejected = Counter.builder("mall.duplicate.submit.rejected.total")
+                .description("防重切面拦截重复提交次数").register(registry);
         this.seckillLatency = Timer.builder(PREFIX + "latency")
                 .description("秒杀请求耗时")
                 .publishPercentileHistogram()
@@ -38,5 +50,9 @@ public class BusinessMetrics {
     public void recordSoldOut() { seckillSoldOut.increment(); }
     public void recordRejected() { seckillRejected.increment(); }
     public void recordCouponClaim() { couponClaimSuccess.increment(); }
+    public void recordCouponReconcileAutoFix() { couponReconcileAutoFix.increment(); }
+    public void recordCouponReconcileAlert() { couponReconcileAlert.increment(); }
+    public void recordCouponBloomRejected() { couponBloomRejected.increment(); }
+    public void recordDuplicateSubmitRejected() { duplicateSubmitRejected.increment(); }
     public void recordLatency(Duration duration) { seckillLatency.record(duration); }
 }

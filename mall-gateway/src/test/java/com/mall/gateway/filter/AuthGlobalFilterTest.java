@@ -4,6 +4,7 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.Test;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
@@ -15,12 +16,16 @@ import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class AuthGlobalFilterTest {
 
@@ -28,9 +33,14 @@ class AuthGlobalFilterTest {
     private final AuthGlobalFilter filter = new AuthGlobalFilter(SECRET);
 
     private String issueToken(Long userId, String role) {
+        return issueTokenWithJti(userId, role, UUID.randomUUID().toString().replace("-", ""));
+    }
+
+    private String issueTokenWithJti(Long userId, String role, String jti) {
         SecretKey key = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
         Date now = new Date();
         return Jwts.builder()
+                .id(jti)
                 .subject(String.valueOf(userId))
                 .claim("userId", userId)
                 .claim("role", role)
@@ -141,5 +151,65 @@ class AuthGlobalFilterTest {
         assertNull(forwarded.get().getRequest().getHeaders().getFirst("X-User-Id"));
         assertNull(forwarded.get().getRequest().getHeaders().getFirst("X-User-Role"));
         assertNull(forwarded.get().getRequest().getHeaders().getFirst("X-Internal-Key"));
+    }
+
+    @Test
+    void shouldRejectBlacklistedJtiAndAllowActiveJti() {
+        ReactiveStringRedisTemplate redis = mock(ReactiveStringRedisTemplate.class);
+        when(redis.hasKey("auth:jwt:blacklist:revoked-jti")).thenReturn(Mono.just(true));
+        when(redis.hasKey("auth:jwt:blacklist:active-jti")).thenReturn(Mono.just(false));
+        AuthGlobalFilter redisFilter = new AuthGlobalFilter(SECRET, redis);
+
+        String revokedToken = issueTokenWithJti(1001L, "USER", "revoked-jti");
+        MockServerWebExchange blockedEx = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/coupon/my")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + revokedToken)
+                        .build());
+        AtomicReference<Boolean> blockedCalled = new AtomicReference<>(false);
+        redisFilter.filter(blockedEx, ex -> {
+            blockedCalled.set(true);
+            return Mono.empty();
+        }).block();
+        assertFalse(blockedCalled.get());
+        assertEquals(HttpStatus.UNAUTHORIZED, blockedEx.getResponse().getStatusCode());
+
+        String activeToken = issueTokenWithJti(1001L, "USER", "active-jti");
+        MockServerWebExchange okEx = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/coupon/my")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + activeToken)
+                        .build());
+        AtomicReference<Boolean> okCalled = new AtomicReference<>(false);
+        redisFilter.filter(okEx, ex -> {
+            okCalled.set(true);
+            return Mono.empty();
+        }).block();
+        assertTrue(okCalled.get());
+
+        String noJtiToken = issueTokenWithJti(1001L, "USER", null);
+        MockServerWebExchange noJtiEx = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/coupon/my")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + noJtiToken)
+                        .build());
+        AtomicReference<Boolean> noJtiCalled = new AtomicReference<>(false);
+        redisFilter.filter(noJtiEx, ex -> {
+            noJtiCalled.set(true);
+            return Mono.empty();
+        }).block();
+        assertFalse(noJtiCalled.get());
+        assertEquals(HttpStatus.UNAUTHORIZED, noJtiEx.getResponse().getStatusCode());
+
+        when(redis.hasKey("auth:jwt:blacklist:error-jti")).thenReturn(Mono.error(new RuntimeException("redis down")));
+        String errToken = issueTokenWithJti(1001L, "USER", "error-jti");
+        MockServerWebExchange errEx = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/coupon/my")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + errToken)
+                        .build());
+        AtomicReference<Boolean> errCalled = new AtomicReference<>(false);
+        redisFilter.filter(errEx, ex -> {
+            errCalled.set(true);
+            return Mono.empty();
+        }).block();
+        assertFalse(errCalled.get());
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, errEx.getResponse().getStatusCode());
     }
 }

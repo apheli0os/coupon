@@ -3,10 +3,13 @@ package com.mall.gateway.filter;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -32,13 +35,27 @@ public final class AuthGlobalFilter implements GlobalFilter, Ordered {
     private static final String USER_ID_HEADER = "X-User-Id";
     private static final String USER_ROLE_HEADER = "X-User-Role";
     private static final String INTERNAL_AUTH_HEADER = "X-Internal-Key";
+    private static final String BLACKLIST_PREFIX = "auth:jwt:blacklist:";
     private static final String DEFAULT_ROLE = "USER";
     private static final List<String> WHITE_LIST = List.of("/api/auth/token", "/actuator/health");
 
     private final SecretKey key;
+    private final ReactiveStringRedisTemplate redisTemplate;
 
-    public AuthGlobalFilter(@Value("${mall.jwt.secret:mall-coupon-platform-default-secret-key-2026}") String secret) {
+    public AuthGlobalFilter(String secret) {
+        this(secret, (ReactiveStringRedisTemplate) null);
+    }
+
+    @Autowired
+    public AuthGlobalFilter(
+            @Value("${mall.jwt.secret:mall-coupon-platform-default-secret-key-2026}") String secret,
+            ObjectProvider<ReactiveStringRedisTemplate> redisProvider) {
+        this(secret, redisProvider == null ? null : redisProvider.getIfAvailable());
+    }
+
+    AuthGlobalFilter(String secret, ReactiveStringRedisTemplate redisTemplate) {
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        this.redisTemplate = redisTemplate;
     }
 
     @Override
@@ -72,6 +89,25 @@ public final class AuthGlobalFilter implements GlobalFilter, Ordered {
                     headers.remove(INTERNAL_AUTH_HEADER);
                 }))
                 .build();
+        String jti = claims.getId();
+        if (redisTemplate != null) {
+            if (!StringUtils.hasText(jti)) {
+                return writeError(exchange, HttpStatus.UNAUTHORIZED, 401, "未登录或登录已失效");
+            }
+            return redisTemplate.hasKey(BLACKLIST_PREFIX + jti)
+                    .map(blacklisted -> Boolean.TRUE.equals(blacklisted) ? 1 : 0)
+                    .onErrorReturn(-1)
+                    .flatMap(state -> {
+                        if (state < 0) {
+                            return writeError(
+                                    exchange, HttpStatus.SERVICE_UNAVAILABLE, 503, "鉴权服务暂不可用，请稍后重试");
+                        }
+                        if (state == 1) {
+                            return writeError(exchange, HttpStatus.UNAUTHORIZED, 401, "登录已失效，请重新登录");
+                        }
+                        return chain.filter(mutated);
+                    });
+        }
         return chain.filter(mutated);
     }
 

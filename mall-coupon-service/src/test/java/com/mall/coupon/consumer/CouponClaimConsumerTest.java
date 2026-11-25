@@ -3,6 +3,7 @@ package com.mall.coupon.consumer;
 import com.mall.common.constants.RedisKey;
 import com.mall.common.message.CouponClaimMessage;
 import com.mall.common.util.LuaScriptExecutor;
+import com.mall.coupon.cache.UserCouponCacheService;
 import com.mall.coupon.domain.entity.UserCoupon;
 import com.mall.coupon.mapper.CouponTemplateMapper;
 import com.mall.coupon.mapper.UserCouponMapper;
@@ -28,13 +29,14 @@ class CouponClaimConsumerTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void onMessage_shouldSkipRolledBackTokensAndOnlyPersistValidMessages() {
+    void onMessage_shouldSkipRolledBackTokensPersistValidAndEvictCache() {
         UserCouponMapper userCouponMapper = mock(UserCouponMapper.class);
         CouponTemplateMapper templateMapper = mock(CouponTemplateMapper.class);
         LuaScriptExecutor luaExecutor = mock(LuaScriptExecutor.class);
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         ValueOperations<String, String> valueOps = mock(ValueOperations.class);
         when(redis.opsForValue()).thenReturn(valueOps);
+        UserCouponCacheService cacheService = mock(UserCouponCacheService.class);
 
         CouponClaimMessage valid = sampleMsg(1L, 100L, 1001L);
         CouponClaimMessage rolledBack = sampleMsg(2L, 100L, 1002L);
@@ -54,7 +56,8 @@ class CouponClaimConsumerTest {
         when(userCouponMapper.batchInsertIgnore(any())).thenReturn(1);
         when(templateMapper.incrReceivedBy(100L, 1)).thenReturn(1);
 
-        CouponClaimConsumer consumer = new CouponClaimConsumer(userCouponMapper, templateMapper, luaExecutor, redis);
+        CouponClaimConsumer consumer = new CouponClaimConsumer(
+                userCouponMapper, templateMapper, luaExecutor, redis, cacheService);
         consumer.onMessage(List.of(valid, rolledBack));
 
         verify(userCouponMapper).batchInsertIgnore(argThat(list -> list.size() == 1
@@ -63,6 +66,7 @@ class CouponClaimConsumerTest {
                 && Integer.valueOf(1).equals(list.get(0).getTarget())
                 && "SKU-1".equals(list.get(0).getProductCode())));
         verify(templateMapper).incrReceivedBy(100L, 1);
+        verify(cacheService).evictUnusedCoupons(1001L);
     }
 
     @Test
@@ -74,6 +78,7 @@ class CouponClaimConsumerTest {
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         ValueOperations<String, String> valueOps = mock(ValueOperations.class);
         when(redis.opsForValue()).thenReturn(valueOps);
+        UserCouponCacheService cacheService = mock(UserCouponCacheService.class);
 
         CouponClaimMessage expiredMsg = sampleMsg(99L, 100L, 1001L);
         when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_TOKEN_CLAIM),
@@ -86,7 +91,8 @@ class CouponClaimConsumerTest {
         when(luaExecutor.parse(List.of(0L, 10L))).thenReturn(new long[]{0L, 10L});
         when(userCouponMapper.selectById(99L)).thenReturn(null);
 
-        CouponClaimConsumer consumer = new CouponClaimConsumer(userCouponMapper, templateMapper, luaExecutor, redis);
+        CouponClaimConsumer consumer = new CouponClaimConsumer(
+                userCouponMapper, templateMapper, luaExecutor, redis, cacheService);
         consumer.onMessage(List.of(expiredMsg));
 
         verify(luaExecutor).execute(eq(LuaScriptExecutor.SCRIPT_COUPON_EXPIRE_COMPENSATE),
@@ -107,6 +113,7 @@ class CouponClaimConsumerTest {
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         ValueOperations<String, String> valueOps = mock(ValueOperations.class);
         when(redis.opsForValue()).thenReturn(valueOps);
+        UserCouponCacheService cacheService = mock(UserCouponCacheService.class);
 
         CouponClaimMessage redelivered = sampleMsg(88L, 100L, 1001L);
         when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_TOKEN_CLAIM),
@@ -117,7 +124,8 @@ class CouponClaimConsumerTest {
         existing.setId(88L);
         when(userCouponMapper.selectById(88L)).thenReturn(existing);
 
-        CouponClaimConsumer consumer = new CouponClaimConsumer(userCouponMapper, templateMapper, luaExecutor, redis);
+        CouponClaimConsumer consumer = new CouponClaimConsumer(
+                userCouponMapper, templateMapper, luaExecutor, redis, cacheService);
         consumer.onMessage(List.of(redelivered));
 
         verify(luaExecutor, never()).execute(eq(LuaScriptExecutor.SCRIPT_COUPON_EXPIRE_COMPENSATE),
@@ -133,6 +141,7 @@ class CouponClaimConsumerTest {
         StringRedisTemplate redis = mock(StringRedisTemplate.class);
         ValueOperations<String, String> valueOps = mock(ValueOperations.class);
         when(redis.opsForValue()).thenReturn(valueOps);
+        UserCouponCacheService cacheService = mock(UserCouponCacheService.class);
 
         CouponClaimMessage valid = sampleMsg(10L, 100L, 1001L);
         when(luaExecutor.execute(eq(LuaScriptExecutor.SCRIPT_TOKEN_CLAIM),
@@ -142,9 +151,9 @@ class CouponClaimConsumerTest {
         when(userCouponMapper.batchInsertIgnore(any())).thenReturn(1);
         when(templateMapper.incrReceivedBy(100L, 1)).thenReturn(0);
 
-        CouponClaimConsumer consumer = new CouponClaimConsumer(userCouponMapper, templateMapper, luaExecutor, redis);
-        assertThrows(IllegalStateException.class, () -> consumer.onMessage(List.of(valid)),
-                "incrReceivedBy 返回 0 时必须抛出异常回滚事务，避免已插入 user_coupon 造成静默超发");
+        CouponClaimConsumer consumer = new CouponClaimConsumer(
+                userCouponMapper, templateMapper, luaExecutor, redis, cacheService);
+        assertThrows(IllegalStateException.class, () -> consumer.onMessage(List.of(valid)));
     }
 
     private CouponClaimMessage sampleMsg(long id, long templateId, long userId) {

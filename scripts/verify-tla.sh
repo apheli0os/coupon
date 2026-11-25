@@ -29,7 +29,7 @@ else
 fi
 
 cd "$models_dir"
-for model in SeckillProtocol CouponLifecycle ActivityTemplateLifecycle; do
+for model in SeckillProtocol CouponLifecycle ActivityTemplateLifecycle StockReconcileDebounce; do
   meta_dir="$(mktemp -d)"
   echo "Verifying TLA+ model: $model"
   set +e

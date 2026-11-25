@@ -4,6 +4,7 @@ import com.mall.common.constants.CommonConstant;
 import com.mall.common.constants.RedisKey;
 import com.mall.common.message.CouponClaimMessage;
 import com.mall.common.util.LuaScriptExecutor;
+import com.mall.coupon.cache.UserCouponCacheService;
 import com.mall.coupon.domain.entity.UserCoupon;
 import com.mall.coupon.mapper.CouponTemplateMapper;
 import com.mall.coupon.mapper.UserCouponMapper;
@@ -39,6 +40,7 @@ public class CouponClaimConsumer {
     private final CouponTemplateMapper templateMapper;
     private final LuaScriptExecutor luaExecutor;
     private final StringRedisTemplate stringRedisTemplate;
+    private final UserCouponCacheService userCouponCacheService;
 
     @KafkaListener(topics = CommonConstant.MQ_TOPIC_COUPON_CLAIM,
             groupId = CommonConstant.MQ_GROUP_COUPON_CLAIM)
@@ -143,6 +145,10 @@ public class CouponClaimConsumer {
                 log.warn("回写领券已消费凭证失败（不影响 DB 主键幂等） couponId={}", msg.getId(), e);
             }
         }
+        messages.stream()
+                .map(CouponClaimMessage::getUserId)
+                .distinct()
+                .forEach(userCouponCacheService::evictUnusedCoupons);
     }
 
     private UserCoupon toEntity(CouponClaimMessage m) {

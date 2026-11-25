@@ -2,6 +2,7 @@ package com.mall.seckill.controller;
 
 import com.mall.common.R;
 import com.mall.common.context.UserContext;
+import com.mall.common.idempotent.NoDuplicateSubmit;
 import com.mall.seckill.domain.dto.SeckillActivityCreateDTO;
 import com.mall.seckill.domain.entity.SeckillActivity;
 import com.mall.seckill.service.SeckillActivityService;
@@ -28,6 +29,7 @@ public class SeckillActivityController {
 
     @Operation(summary = "创建秒杀活动（管理员）")
     @PostMapping
+    @NoDuplicateSubmit(lockSeconds = 3)
     public R<Long> create(@Valid @RequestBody SeckillActivityCreateDTO dto) {
         UserContext.requireAdmin();
         return R.ok(activityService.create(dto));
@@ -35,6 +37,7 @@ public class SeckillActivityController {
 
     @Operation(summary = "发布活动（库存预热，管理员）")
     @PostMapping("/{id}/publish")
+    @NoDuplicateSubmit(unlockOnFinish = true)
     public R<Void> publish(@PathVariable Long id) {
         UserContext.requireAdmin();
         activityService.publish(id);

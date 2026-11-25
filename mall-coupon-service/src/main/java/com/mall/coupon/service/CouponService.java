@@ -1,5 +1,6 @@
 package com.mall.coupon.service;
 
+import com.mall.common.PageResult;
 import com.mall.coupon.domain.dto.CouponQuoteRequestDTO;
 import com.mall.coupon.domain.dto.CouponQuoteResponseDTO;
 import com.mall.coupon.domain.dto.CouponUseDTO;
@@ -13,6 +14,8 @@ public interface CouponService {
     void claim(Long templateId);
 
     List<UserCoupon> listMyCoupons(Integer status);
+
+    PageResult<UserCoupon> pageMyCoupons(long pageNum, long pageSize, Integer status);
 
     CouponQuoteResponseDTO quoteCoupons(CouponQuoteRequestDTO dto);
 

@@ -2,14 +2,17 @@ package com.mall.common.interceptor;
 
 import com.mall.common.ResultCode;
 import com.mall.common.constants.CommonConstant;
+import com.mall.common.constants.RedisKey;
 import com.mall.common.context.UserContext;
 import com.mall.common.exception.BizException;
 import com.mall.common.util.JwtUtil;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.server.PathContainer;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -24,17 +27,26 @@ public class UserContextInterceptor implements HandlerInterceptor {
 
     private final JwtUtil jwtUtil;
     private final String internalKey;
+    private final ObjectProvider<StringRedisTemplate> redisProvider;
 
     public UserContextInterceptor(JwtUtil jwtUtil) {
         this(jwtUtil, CommonConstant.DEFAULT_INTERNAL_KEY);
     }
 
+    public UserContextInterceptor(JwtUtil jwtUtil, String internalKey) {
+        this.jwtUtil = jwtUtil;
+        this.internalKey = internalKey == null ? CommonConstant.DEFAULT_INTERNAL_KEY : internalKey;
+        this.redisProvider = null;
+    }
+
     @Autowired
     public UserContextInterceptor(
             JwtUtil jwtUtil,
-            @Value("${mall.internal.key:" + CommonConstant.DEFAULT_INTERNAL_KEY + "}") String internalKey) {
+            @Value("${mall.internal.key:" + CommonConstant.DEFAULT_INTERNAL_KEY + "}") String internalKey,
+            ObjectProvider<StringRedisTemplate> redisProvider) {
         this.jwtUtil = jwtUtil;
         this.internalKey = internalKey == null ? CommonConstant.DEFAULT_INTERNAL_KEY : internalKey;
+        this.redisProvider = redisProvider;
     }
 
     @Override
@@ -47,6 +59,7 @@ public class UserContextInterceptor implements HandlerInterceptor {
         }
         Claims claims = jwtUtil.parseClaims(request.getHeader(JwtUtil.HEADER));
         if (claims != null && claims.get("userId") != null) {
+            verifyNotBlacklisted(claims);
             Long userId = Long.valueOf(claims.get("userId").toString());
             Object roleClaim = claims.get("role");
             String role = roleClaim == null ? CommonConstant.ROLE_USER : roleClaim.toString();
@@ -64,6 +77,25 @@ public class UserContextInterceptor implements HandlerInterceptor {
             }
         }
         return true;
+    }
+
+    private void verifyNotBlacklisted(Claims claims) {
+        StringRedisTemplate redis = redisProvider == null ? null : redisProvider.getIfAvailable();
+        if (redis == null) {
+            return;
+        }
+        if (!StringUtils.hasText(claims.getId())) {
+            throw new BizException(ResultCode.UNAUTHORIZED, "登录已失效，请重新登录");
+        }
+        Boolean blacklisted;
+        try {
+            blacklisted = redis.hasKey(RedisKey.jwtBlacklist(claims.getId()));
+        } catch (Exception e) {
+            throw new BizException(ResultCode.SYSTEM_ERROR, "鉴权服务暂不可用，请稍后重试");
+        }
+        if (Boolean.TRUE.equals(blacklisted)) {
+            throw new BizException(ResultCode.UNAUTHORIZED, "登录已失效，请重新登录");
+        }
     }
 
     private boolean matchesInternalKey(String supplied) {

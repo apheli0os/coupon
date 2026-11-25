@@ -48,6 +48,7 @@ spring:
       properties:
         enable.idempotence: true
         max.in.flight.requests.per.connection: 5
+        interceptor.classes: com.mall.common.trace.TraceKafkaProducerInterceptor
     consumer:
       group-id: coupon-claim-consumer-group
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
@@ -106,3 +107,7 @@ resilience4j:
     configs:
       default:
         timeoutDuration: 3s
+
+logging:
+  pattern:
+    level: "%5p [traceId=%X{traceId:-}]"

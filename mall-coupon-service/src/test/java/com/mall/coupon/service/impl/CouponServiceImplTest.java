@@ -2,6 +2,8 @@ package com.mall.coupon.service.impl;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.mall.common.PageResult;
 import com.mall.common.R;
 import com.mall.common.ResultCode;
 import com.mall.common.constants.RedisKey;
@@ -11,6 +13,7 @@ import com.mall.common.message.CouponClaimMessage;
 import com.mall.common.metrics.BusinessMetrics;
 import com.mall.common.util.IdGenerator;
 import com.mall.common.util.LuaScriptExecutor;
+import com.mall.coupon.cache.UserCouponCacheService;
 import com.mall.coupon.domain.dto.CouponQuoteRequestDTO;
 import com.mall.coupon.domain.dto.CouponQuoteResponseDTO;
 import com.mall.coupon.domain.dto.CouponUseDTO;
@@ -27,6 +30,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -43,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -60,6 +65,7 @@ class CouponServiceImplTest {
     private OrderFeignClient orderFeignClient;
     private BusinessMetrics metrics;
     private KafkaTemplate<String, Object> kafkaTemplate;
+    private UserCouponCacheService userCouponCacheService;
     private CouponServiceImpl couponService;
 
     @BeforeEach
@@ -77,9 +83,12 @@ class CouponServiceImplTest {
         orderFeignClient = mock(OrderFeignClient.class);
         metrics = mock(BusinessMetrics.class);
         kafkaTemplate = mock(KafkaTemplate.class);
+        userCouponCacheService = mock(UserCouponCacheService.class);
+        when(userCouponCacheService.listUnusedCoupons(anyLong(), any()))
+                .thenAnswer(inv -> userCouponMapper.selectList(null));
         couponService = new CouponServiceImpl(
                 templateService, userCouponMapper, luaExecutor, stringRedisTemplate,
-                idGenerator, orderFeignClient, metrics, kafkaTemplate);
+                idGenerator, orderFeignClient, metrics, kafkaTemplate, userCouponCacheService);
         UserContext.set(1001L);
     }
 
@@ -216,6 +225,25 @@ class CouponServiceImplTest {
         downDto.setUserCouponId(12L);
         BizException downEx = assertThrows(BizException.class, () -> couponService.useCoupon(downDto));
         assertEquals(ResultCode.SYSTEM_ERROR.getCode(), downEx.getCode());
+    }
+
+    @Test
+    void pageMyCouponsAndCachedUnusedList_shouldReturnExpectedResults() {
+        UserCoupon c1 = fixedCoupon(1L, new BigDecimal("20.00"), new BigDecimal("100.00"),
+                LocalDateTime.now().plusDays(1));
+        c1.setCreateTime(LocalDateTime.now().minusMinutes(5));
+        Page<UserCoupon> mpPage = new Page<>(1, 10);
+        mpPage.setTotal(1);
+        mpPage.setRecords(List.of(c1));
+        when(userCouponMapper.selectPage(ArgumentMatchers.<Page<UserCoupon>>any(), any())).thenReturn(mpPage);
+
+        PageResult<UserCoupon> paged = couponService.pageMyCoupons(0L, 200L, CouponEnums.COUPON_UNUSED);
+        assertEquals(1L, paged.getTotal());
+        assertEquals(1, paged.getRecords().size());
+
+        when(userCouponCacheService.listUnusedCoupons(eq(1001L), any(LocalDateTime.class))).thenReturn(List.of(c1));
+        assertEquals(1, couponService.listMyCoupons(CouponEnums.COUPON_UNUSED).size());
+        verify(userCouponCacheService).listUnusedCoupons(eq(1001L), any(LocalDateTime.class));
     }
 
     private UserCoupon fixedCoupon(long id, BigDecimal discount, BigDecimal threshold, LocalDateTime expire) {

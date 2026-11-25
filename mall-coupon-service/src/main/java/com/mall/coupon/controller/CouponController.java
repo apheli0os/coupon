@@ -1,5 +1,6 @@
 package com.mall.coupon.controller;
 
+import com.mall.common.PageResult;
 import com.mall.common.R;
 import com.mall.coupon.domain.dto.CouponQuoteRequestDTO;
 import com.mall.coupon.domain.dto.CouponQuoteResponseDTO;
@@ -39,6 +40,14 @@ public class CouponController {
     @GetMapping("/my")
     public R<List<UserCoupon>> myCoupons(@RequestParam(required = false) Integer status) {
         return R.ok(couponService.listMyCoupons(status));
+    }
+
+    @GetMapping("/my/page")
+    public R<PageResult<UserCoupon>> pageMyCoupons(
+            @RequestParam(defaultValue = "1") long pageNum,
+            @RequestParam(defaultValue = "20") long pageSize,
+            @RequestParam(required = false) Integer status) {
+        return R.ok(couponService.pageMyCoupons(pageNum, pageSize, status));
     }
 
     @PostMapping("/quote")
