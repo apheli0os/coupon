@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: mall-order-service
+  task:
+    scheduling:
+      pool:
+        size: 2
   cloud:
     nacos:
       discovery:

@@ -106,6 +106,18 @@ public final class RedisKey {
         return "seckill:{" + activityId + "}:token:" + orderId;
     }
 
+    public static String seckillReservation(Long activityId, String orderId) {
+        return "seckill:{" + activityId + "}:reservation:" + orderId;
+    }
+
+    public static String seckillReservationOwners(Long activityId) {
+        return "seckill:{" + activityId + "}:reservation:owners";
+    }
+
+    public static String seckillReservationsDue(Long activityId) {
+        return "seckill:{" + activityId + "}:reservations:due";
+    }
+
     /** 关单归还库存幂等键（按 orderId 防止宕机重试时误撤用户重新下单的新订单） */
     public static String seckillOrderRollbackGuard(Long activityId, String orderId) {
         return "seckill:{" + activityId + "}:rollback:" + orderId;

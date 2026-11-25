@@ -11,7 +11,7 @@ VARIABLES
   orders,         \* [1..MaxOrders -> "none" | "unpaid" | "paid" | "cancelled"]
   restored,       \* [1..MaxOrders -> BOOLEAN]
   pendingSend,    \* 0..MaxOrders (producer in-flight after Lua deduct)
-  mqOrder,        \* subset of 1..MaxOrders: pending in seckill-topic for OrderService
+  mqOrder,
   redeliver,      \* subset of 1..MaxOrders: already-committed order redelivered by Kafka
   mqSold,         \* subset of 1..MaxOrders: pending in seckill-order-created-topic (published AFTER DB insert!)
   mqCancel,       \* subset of 1..MaxOrders: pending in seckill-cancel-topic for SoldConsumer
@@ -24,6 +24,11 @@ vars == <<stock, inUsers, tokens, rollbackGuard, orders, restored, pendingSend,
 
 ActiveOrders == Cardinality({o \in 1..MaxOrders : orders[o] \in {"unpaid", "paid"}})
 HasActiveOrder == \E o \in 1..MaxOrders : orders[o] \in {"unpaid", "paid"}
+HasOpenReservation == \E o \in 1..MaxOrders : tokens[o] \in {"raw", "proc"}
+ReservedStock ==
+  Cardinality({o \in 1..MaxOrders :
+    (orders[o] = "none" /\ tokens[o] \in {"raw", "proc"})
+    \/ (orders[o] = "cancelled" /\ o \notin rollbackGuard)})
 
 Init ==
   /\ stock = TotalStock
@@ -79,43 +84,55 @@ KafkaTimeoutAfterBroker ==
         ELSE UNCHANGED <<stock, inUsers, tokens, rollbackGuard>>
   /\ UNCHANGED <<orders, restored, redeliver, mqSold, mqCancel, soldState, soldCount, nextId>>
 
-\* 2c. Per-order token TTL expires while message sits in Kafka backlog
-TokenTtlExpire(oid) ==
-  /\ tokens[oid] = "raw"
-  /\ pendingSend # oid
-  /\ tokens' = [tokens EXCEPT ![oid] = "none"]
-  /\ UNCHANGED <<stock, inUsers, rollbackGuard, orders, restored, pendingSend, mqOrder, redeliver, mqSold, mqCancel, soldState, soldCount, nextId>>
+ProducerCrashBeforeSend ==
+  /\ pendingSend # 0
+  /\ pendingSend' = 0
+  /\ UNCHANGED <<stock, inUsers, tokens, rollbackGuard, orders, restored, mqOrder, redeliver, mqSold, mqCancel, soldState, soldCount, nextId>>
 
-\* 3a. OrderServiceImpl.createSeckillOrder: normal consume & commit (or expired-token compensation)
+ReleaseDueReservation(oid) ==
+  /\ tokens[oid] = "raw"
+  /\ tokens' = [tokens EXCEPT ![oid] = "none"]
+  /\ stock' = stock + 1
+  /\ inUsers' = FALSE
+  /\ rollbackGuard' = rollbackGuard \cup {oid}
+  /\ UNCHANGED <<orders, restored, pendingSend, mqOrder, redeliver, mqSold, mqCancel, soldState, soldCount, nextId>>
+
 OrderConsumeCommit(oid) ==
   /\ oid \in mqOrder
   /\ orders[oid] = "none"
+  /\ tokens[oid] # "raw"
   /\ mqOrder' = mqOrder \ {oid}
-  /\ IF tokens[oid] \in {"raw", "proc"}
-     THEN IF ~HasActiveOrder
-          THEN /\ orders' = [orders EXCEPT ![oid] = "unpaid"]
-               /\ tokens' = [tokens EXCEPT ![oid] = "cons"]
-               /\ mqSold' = mqSold \cup {oid}
-               /\ UNCHANGED <<stock, inUsers, rollbackGuard>>
-          ELSE /\ tokens' = [tokens EXCEPT ![oid] = "cons"]
-               /\ UNCHANGED <<orders, mqSold, stock, inUsers, rollbackGuard>>
-     ELSE \* token missing (producer rollback or TTL expiry): run seckill_expire_compensate.lua
-          /\ UNCHANGED <<orders, tokens, mqSold>>
-          /\ IF tokens[oid] = "none" /\ oid \notin rollbackGuard
-             THEN /\ rollbackGuard' = rollbackGuard \cup {oid}
-                  /\ IF inUsers
-                     THEN /\ inUsers' = FALSE
-                          /\ stock' = stock + 1
-                     ELSE UNCHANGED <<inUsers, stock>>
-             ELSE UNCHANGED <<stock, inUsers, rollbackGuard>>
-  /\ UNCHANGED <<restored, pendingSend, redeliver, mqCancel, soldState, soldCount, nextId>>
+  /\ IF tokens[oid] = "proc"
+     THEN /\ ~HasActiveOrder
+          /\ orders' = [orders EXCEPT ![oid] = "unpaid"]
+          /\ mqSold' = mqSold \cup {oid}
+     ELSE UNCHANGED <<orders, mqSold>>
+  /\ UNCHANGED <<stock, inUsers, tokens, rollbackGuard, restored, pendingSend, redeliver, mqCancel, soldState, soldCount, nextId>>
 
-\* 3b. OrderServiceImpl.createSeckillOrder: crashes after token_claim.lua (PROCESSING) before DB commit
-OrderConsumeClaimCrash(oid) ==
+OrderConsumeClaim(oid) ==
   /\ oid \in mqOrder
   /\ orders[oid] = "none"
   /\ tokens[oid] = "raw"
   /\ tokens' = [tokens EXCEPT ![oid] = "proc"]
+  /\ UNCHANGED <<stock, inUsers, rollbackGuard, orders, restored, pendingSend, mqOrder, redeliver, mqSold, mqCancel, soldState, soldCount, nextId>>
+
+DropProcessingDelivery(oid) ==
+  /\ tokens[oid] = "proc"
+  /\ oid \in mqOrder
+  /\ mqOrder' = mqOrder \ {oid}
+  /\ UNCHANGED <<stock, inUsers, tokens, rollbackGuard, orders, restored, pendingSend, redeliver, mqSold, mqCancel, soldState, soldCount, nextId>>
+
+ReplayProcessing(oid) ==
+  /\ tokens[oid] = "proc"
+  /\ orders[oid] = "none"
+  /\ oid \notin mqOrder
+  /\ mqOrder' = mqOrder \cup {oid}
+  /\ UNCHANGED <<stock, inUsers, tokens, rollbackGuard, orders, restored, pendingSend, redeliver, mqSold, mqCancel, soldState, soldCount, nextId>>
+
+CompleteReservation(oid) ==
+  /\ tokens[oid] = "proc"
+  /\ orders[oid] # "none"
+  /\ tokens' = [tokens EXCEPT ![oid] = "cons"]
   /\ UNCHANGED <<stock, inUsers, rollbackGuard, orders, restored, pendingSend, mqOrder, redeliver, mqSold, mqCancel, soldState, soldCount, nextId>>
 
 \* 3c. Kafka at-least-once redelivery of an already-inserted order
@@ -128,7 +145,7 @@ KafkaRedeliver(oid) ==
 OrderConsumeRedeliver(oid) ==
   /\ oid \in redeliver
   /\ orders[oid] # "none"
-  /\ IF orders[oid] # "cancelled"
+  /\ IF tokens[oid] = "proc"
      THEN tokens' = [tokens EXCEPT ![oid] = "cons"]
      ELSE UNCHANGED tokens
   /\ redeliver' = redeliver \ {oid}
@@ -201,6 +218,7 @@ CancelSoldConsume(oid) ==
 
 Done ==
   /\ pendingSend = 0
+  /\ ~HasOpenReservation
   /\ mqOrder = {}
   /\ redeliver = {}
   /\ mqSold = {}
@@ -212,9 +230,13 @@ Next ==
   \/ UserBuy
   \/ KafkaSendAck
   \/ KafkaTimeoutAfterBroker
-  \/ \E oid \in 1..MaxOrders : TokenTtlExpire(oid)
+  \/ ProducerCrashBeforeSend
+  \/ \E oid \in 1..MaxOrders : ReleaseDueReservation(oid)
+  \/ \E oid \in 1..MaxOrders : OrderConsumeClaim(oid)
   \/ \E oid \in 1..MaxOrders : OrderConsumeCommit(oid)
-  \/ \E oid \in 1..MaxOrders : OrderConsumeClaimCrash(oid)
+  \/ \E oid \in 1..MaxOrders : DropProcessingDelivery(oid)
+  \/ \E oid \in 1..MaxOrders : ReplayProcessing(oid)
+  \/ \E oid \in 1..MaxOrders : CompleteReservation(oid)
   \/ \E oid \in 1..MaxOrders : KafkaRedeliver(oid)
   \/ \E oid \in 1..MaxOrders : OrderConsumeRedeliver(oid)
   \/ \E oid \in 1..MaxOrders : PayOrder(oid)
@@ -229,10 +251,11 @@ Next ==
 
 \* 1. Never oversell
 NoOversell == ActiveOrders <= TotalStock
+StockConservedWithReservations == stock + ActiveOrders + ReservedStock = TotalStock
 
 \* 2. When system reaches quiescent state, Redis stock + active orders == TotalStock (no phantom stock leak!)
 StockConservedAtRest ==
-  (pendingSend = 0 /\ mqOrder = {} /\ ~\E o \in 1..MaxOrders : orders[o] = "cancelled" /\ ~restored[o])
+  (pendingSend = 0 /\ mqOrder = {} /\ ~HasOpenReservation /\ ~\E o \in 1..MaxOrders : orders[o] = "cancelled" /\ ~restored[o])
     => (stock + ActiveOrders = TotalStock /\ (inUsers <=> ActiveOrders > 0))
 
 \* 3. At rest, DB sold_count equals actual active (unpaid + paid) orders

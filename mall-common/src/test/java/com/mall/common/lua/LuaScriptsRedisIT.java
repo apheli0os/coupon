@@ -1,6 +1,9 @@
 package com.mall.common.lua;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mall.common.constants.RedisKey;
+import com.mall.common.message.SeckillOrderMessage;
+import com.mall.common.seckill.SeckillReservationStore;
 import com.mall.common.util.LuaScriptExecutor;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -14,13 +17,16 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import java.math.BigDecimal;
 import java.time.Duration;
-import java.util.ArrayList;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LuaScriptsRedisIT {
 
@@ -178,31 +184,11 @@ class LuaScriptsRedisIT {
     void seckillScripts_shouldEnforceBucketsGuardsAndSoldStateMachine() {
         long actId = 2001L;
         long userId = 6001L;
-        List<String> keys = new ArrayList<>();
-        for (int i = 0; i < RedisKey.SECKILL_STOCK_BUCKETS; i++) {
-            String bucketKey = RedisKey.seckillStockBucket(actId, i);
-            redisTemplate.opsForValue().set(bucketKey, i == 0 ? "1" : "0", Duration.ofMinutes(10));
-            keys.add(bucketKey);
-        }
+        int bucket = 0;
         String usersKey = RedisKey.seckillUsers(actId);
-        String statusKey = RedisKey.seckillStatus(actId);
-        keys.add(usersKey);
-        keys.add(statusKey);
-        redisTemplate.opsForValue().set(statusKey, RedisKey.STATUS_ACTIVE, Duration.ofMinutes(10));
-
-        long[] deduct = luaExecutor.parse(luaExecutor.execute(
-                LuaScriptExecutor.SCRIPT_SECKILL,
-                keys,
-                userId, RedisKey.bucketOf(userId), RedisKey.SECKILL_STOCK_BUCKETS));
-        assertEquals(0L, deduct[0]);
-        int bucket = (int) deduct[1];
-        assertEquals(0, bucket);
-
-        long[] dup = luaExecutor.parse(luaExecutor.execute(
-                LuaScriptExecutor.SCRIPT_SECKILL,
-                keys,
-                userId, RedisKey.bucketOf(userId), RedisKey.SECKILL_STOCK_BUCKETS));
-        assertEquals(-2L, dup[0]);
+        String ownersKey = RedisKey.seckillReservationOwners(actId);
+        redisTemplate.opsForValue().set(RedisKey.seckillStockBucket(actId, bucket), "0", Duration.ofMinutes(10));
+        redisTemplate.opsForSet().add(usersKey, String.valueOf(userId));
 
         String ord1 = "ORD-IT-1";
         String token1 = RedisKey.seckillOrderToken(actId, ord1);
@@ -218,35 +204,23 @@ class LuaScriptsRedisIT {
 
         long[] expireAfterRollback = luaExecutor.parse(luaExecutor.execute(
                 LuaScriptExecutor.SCRIPT_SECKILL_EXPIRE_COMPENSATE,
-                List.of(RedisKey.seckillStockBucket(actId, bucket), usersKey, token1, guard1),
+                List.of(RedisKey.seckillStockBucket(actId, bucket), usersKey, token1, guard1, ownersKey),
                 userId, 3600));
         assertEquals(1L, expireAfterRollback[0]);
         assertEquals("1", redisTemplate.opsForValue().get(RedisKey.seckillStockBucket(actId, bucket)));
 
         long userId2 = 6002L;
-        long[] deduct2 = luaExecutor.parse(luaExecutor.execute(
-                LuaScriptExecutor.SCRIPT_SECKILL,
-                keys,
-                userId2, RedisKey.bucketOf(userId2), RedisKey.SECKILL_STOCK_BUCKETS));
-        assertEquals(0L, deduct2[0]);
-        int bucket2 = (int) deduct2[1];
+        redisTemplate.opsForValue().decrement(RedisKey.seckillStockBucket(actId, bucket));
+        redisTemplate.opsForSet().add(usersKey, String.valueOf(userId2));
         String ord2 = "ORD-IT-2";
         String token2 = RedisKey.seckillOrderToken(actId, ord2);
-        String guard2 = RedisKey.seckillOrderRollbackGuard(actId, ord2);
         redisTemplate.opsForValue().set(token2, ord2, Duration.ofMinutes(5));
-
-        long[] cancelRollback = luaExecutor.parse(luaExecutor.execute(
-                LuaScriptExecutor.SCRIPT_SECKILL_CANCEL_ROLLBACK,
-                List.of(RedisKey.seckillStockBucket(actId, bucket2), usersKey, guard2, token2),
-                userId2, ord2, 3600));
+        long[] cancelRollback = cancelReservation(actId, userId2, ord2, bucket);
         assertEquals(0L, cancelRollback[0]);
         assertEquals(1L, cancelRollback[1]);
         assertNull(redisTemplate.opsForValue().get(token2));
 
-        long[] cancelRetry = luaExecutor.parse(luaExecutor.execute(
-                LuaScriptExecutor.SCRIPT_SECKILL_CANCEL_ROLLBACK,
-                List.of(RedisKey.seckillStockBucket(actId, bucket2), usersKey, guard2, token2),
-                userId2, ord2, 3600));
+        long[] cancelRetry = cancelReservation(actId, userId2, ord2, bucket);
         assertEquals(1L, cancelRetry[0]);
         assertEquals(1L, cancelRetry[1]);
 
@@ -265,5 +239,113 @@ class LuaScriptsRedisIT {
                 LuaScriptExecutor.SCRIPT_SECKILL_SOLD_STATE, List.of(stateOutOfOrder), "CANCEL", 3600))[0]);
         assertEquals(0L, luaExecutor.parse(luaExecutor.execute(
                 LuaScriptExecutor.SCRIPT_SECKILL_SOLD_STATE, List.of(stateOutOfOrder), "SOLD", 3600))[0]);
+    }
+
+    @Test
+    void seckillReservation_shouldReleaseUnpublishedOrderAndRejectLateMessageAfterRebuy() {
+        long activityId = 2201L;
+        long userId = 6101L;
+        String stockKey = initializeSeckill(activityId);
+        String dueKey = RedisKey.seckillReservationsDue(activityId);
+        SeckillReservationStore store = reservations();
+        SeckillOrderMessage first = reservation("ORD-NO-PUBLISH", activityId, userId);
+        SeckillOrderMessage second = reservation("ORD-REBUY", activityId, userId);
+
+        assertEquals(0L, store.reserve(first)[0]);
+        assertEquals("0", redisTemplate.opsForValue().get(stockKey));
+        assertEquals("PENDING", redisTemplate.opsForHash().get(
+                RedisKey.seckillReservation(activityId, first.getOrderId()), "state"));
+        assertEquals(-2L, store.reserve(second)[0]);
+        redisTemplate.opsForZSet().add(dueKey, first.getOrderId(), 1);
+        assertEquals(Set.of(first.getOrderId()), store.dueOrderIds(activityId, 100));
+        assertFalse(store.claim(first));
+        assertTrue(store.recover(activityId, first.getOrderId()).isEmpty());
+        assertEquals("1", redisTemplate.opsForValue().get(stockKey));
+        assertFalse(redisTemplate.hasKey(dueKey));
+
+        assertEquals(0L, store.reserve(second)[0]);
+        assertFalse(store.claim(first));
+        assertFalse(store.confirmClaimOrRelease(activityId, first.getOrderId()));
+        String legacyOrder = "ORD-LEGACY";
+        long[] legacyResult = luaExecutor.parse(luaExecutor.execute(
+                LuaScriptExecutor.SCRIPT_SECKILL_EXPIRE_COMPENSATE,
+                List.of(stockKey, RedisKey.seckillUsers(activityId),
+                        RedisKey.seckillOrderToken(activityId, legacyOrder),
+                        RedisKey.seckillOrderRollbackGuard(activityId, legacyOrder),
+                        RedisKey.seckillReservationOwners(activityId)),
+                userId, 3600));
+        assertEquals(2L, legacyResult[0]);
+        assertEquals("0", redisTemplate.opsForValue().get(stockKey));
+        assertEquals(second.getOrderId(), redisTemplate.opsForHash().get(
+                RedisKey.seckillReservationOwners(activityId), String.valueOf(userId)));
+    }
+
+    @Test
+    void seckillReservation_shouldReplayProcessingWithoutReturningStockAndCleanUpAfterCommit() {
+        long activityId = 2202L;
+        long userId = 6102L;
+        String stockKey = initializeSeckill(activityId);
+        String dueKey = RedisKey.seckillReservationsDue(activityId);
+        SeckillReservationStore store = reservations();
+        SeckillOrderMessage original = reservation("ORD-PROCESSING", activityId, userId);
+        assertEquals(0L, store.reserve(original)[0]);
+        assertTrue(store.claim(original));
+        assertTrue(store.confirmClaimOrRelease(activityId, original.getOrderId()));
+        redisTemplate.opsForZSet().add(dueKey, original.getOrderId(), 1);
+
+        assertEquals(original, store.recover(activityId, original.getOrderId()).orElseThrow());
+        assertTrue(store.recover(activityId, original.getOrderId()).isEmpty());
+        assertEquals("0", redisTemplate.opsForValue().get(stockKey));
+        assertTrue(store.claim(original));
+        store.complete(activityId, original.getOrderId());
+        assertTrue(store.confirmClaimOrRelease(activityId, original.getOrderId()));
+        assertFalse(store.claim(original));
+        assertFalse(redisTemplate.hasKey(dueKey));
+
+        assertEquals(0L, cancelReservation(activityId, userId, original.getOrderId(), 0)[0]);
+        SeckillOrderMessage next = reservation("ORD-AFTER-CANCEL", activityId, userId);
+        assertEquals(0L, store.reserve(next)[0]);
+        redisTemplate.delete(RedisKey.seckillOrderRollbackGuard(activityId, original.getOrderId()));
+        assertEquals(1L, cancelReservation(activityId, userId, original.getOrderId(), 0)[0]);
+        assertTrue(store.claim(next));
+        assertEquals("0", redisTemplate.opsForValue().get(stockKey));
+    }
+
+    private long[] cancelReservation(long activityId, long userId, String orderId, int bucket) {
+        return luaExecutor.parse(luaExecutor.execute(
+                LuaScriptExecutor.SCRIPT_SECKILL_CANCEL_ROLLBACK,
+                List.of(RedisKey.seckillStockBucket(activityId, bucket),
+                        RedisKey.seckillUsers(activityId),
+                        RedisKey.seckillOrderRollbackGuard(activityId, orderId),
+                        RedisKey.seckillOrderToken(activityId, orderId),
+                        RedisKey.seckillReservationOwners(activityId),
+                        RedisKey.seckillReservationsDue(activityId),
+                        RedisKey.seckillReservation(activityId, orderId)),
+                userId, orderId, 3600));
+    }
+
+    private String initializeSeckill(long activityId) {
+        String stockKey = RedisKey.seckillStockBucket(activityId, 0);
+        redisTemplate.opsForValue().set(stockKey, "1", Duration.ofMinutes(10));
+        redisTemplate.opsForValue().set(RedisKey.seckillStatus(activityId), RedisKey.STATUS_ACTIVE, Duration.ofMinutes(10));
+        return stockKey;
+    }
+
+    private SeckillReservationStore reservations() {
+        return new SeckillReservationStore(luaExecutor, redisTemplate, new ObjectMapper().findAndRegisterModules());
+    }
+
+    private SeckillOrderMessage reservation(String orderId, long activityId, long userId) {
+        SeckillOrderMessage message = new SeckillOrderMessage();
+        message.setOrderId(orderId);
+        message.setActivityId(activityId);
+        message.setUserId(userId);
+        message.setStockBucket(0);
+        message.setProductCode("SKU-RESERVE");
+        message.setSeckillPrice(new BigDecimal("19.90"));
+        message.setCreateTime(LocalDateTime.of(2026, 11, 25, 8, 0));
+        message.setQuantity(1);
+        message.setReservationTracked(true);
+        return message;
     }
 }

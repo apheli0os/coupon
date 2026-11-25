@@ -1,4 +1,4 @@
-if redis.call('EXISTS', KEYS[3]) == 1 then
+if redis.call('EXISTS', KEYS[3]) == 1 or redis.call('HEXISTS', KEYS[5], ARGV[1]) == 1 then
   local stock = tonumber(redis.call('GET', KEYS[1]) or '0')
   return {2, stock}
 end
